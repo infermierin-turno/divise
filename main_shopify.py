@@ -79,7 +79,7 @@ def preview_shopify_descriptions():
         title = product.get("title")
         current_body = product.get("body_html", "")
         
-        seo_data = agent.optimize_coffee_content(title, current_body)
+        seo_data = agent.optimize_divise_content(title, current_body)
         if not seo_data:
             seo_data = {
                 "seo_title": title,
