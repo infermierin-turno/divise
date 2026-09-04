@@ -12,7 +12,7 @@ class ShopifyCoffeeAgent:
         self.client_secret = client_secret or os.getenv("SHOPIFY_CLIENT_SECRET") or os.getenv("SHOPIFY_SECRET")
         self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
         
-        # Se abbiamo client_id e client_secret (shpss_), otteniamo il token dinamico
+        # Se abbiamo client_id e il secret con shpss_, otteniamo il token tramite OAuth client credentials / token exchange
         self.token = self.access_token
         if not self.token and self.client_id and self.client_secret:
             self.token = self._fetch_oauth_token()
@@ -23,14 +23,20 @@ class ShopifyCoffeeAgent:
         }
 
     def _fetch_oauth_token(self):
-        """Ottiene un token di accesso temporaneo scambiando Client ID e Client Secret."""
-        auth_url = f"https://{self.shop_url.replace('https://', '').replace('http://', '')}/admin/oauth/access_token"
+        """Ottiene il token di accesso scambiando Client ID e Client Secret (shpss_)."""
+        clean_shop = self.shop_url.replace('https://', '').replace('http://', '')
+        auth_url = f"https://{clean_shop}/admin/oauth/access_token"
+        
         payload = {
             "client_id": self.client_id,
             "client_secret": self.client_secret
         }
+        
         try:
             response = requests.post(auth_url, json=payload)
+            print(f"[DEBUG OAUTH] Status Code: {response.status_code}")
+            print(f"[DEBUG OAUTH] Risposta: {response.text}")
+            
             if response.status_code == 200:
                 data = response.json()
                 return data.get("access_token")
