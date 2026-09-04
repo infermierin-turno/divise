@@ -12,40 +12,25 @@ class ShopifyCoffeeAgent:
         self.client_secret = client_secret or os.getenv("SHOPIFY_CLIENT_SECRET") or os.getenv("SHOPIFY_SECRET")
         self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
         
-        # Se abbiamo client_id e il secret con shpss_, otteniamo il token tramite OAuth client credentials / token exchange
+        # Per le API di Shopify, se disponiamo di un access token diretto lo usiamo, 
+        # altrimenti se abbiamo la chiave API/Client ID e il secret (shpss_), 
+        # configuriamo l'autenticazione HTTP Basic o l'header basato su di essi.
         self.token = self.access_token
-        if not self.token and self.client_id and self.client_secret:
-            self.token = self._fetch_oauth_token()
-
+        
+        # Prepariamo gli headers di autenticazione standard per Shopify Admin API
         self.headers = {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": self.token if self.token else ""
-        }
-
-    def _fetch_oauth_token(self):
-        """Ottiene il token di accesso scambiando Client ID e Client Secret (shpss_)."""
-        clean_shop = self.shop_url.replace('https://', '').replace('http://', '')
-        auth_url = f"https://{clean_shop}/admin/oauth/access_token"
-        
-        payload = {
-            "client_id": self.client_id,
-            "client_secret": self.client_secret
+            "Content-Type": "application/json"
         }
         
-        try:
-            response = requests.post(auth_url, json=payload)
-            print(f"[DEBUG OAUTH] Status Code: {response.status_code}")
-            print(f"[DEBUG OAUTH] Risposta: {response.text}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("access_token")
-            else:
-                print(f"[ERRORE OAUTH] Impossibile ottenere il token: {response.status_code} - {response.text}")
-                return None
-        except Exception as e:
-            print(f"[ERRORE OAUTH] Eccezione durante la richiesta token: {e}")
-            return None
+        if self.token:
+            self.headers["X-Shopify-Access-Token"] = self.token
+        elif self.client_id and self.client_secret:
+            # Se stiamo usando le credenziali API (chiave e segreto), le passiamo come token o autenticazione
+            # Nota: se Shopify richiede la chiave API come username e il secret come password per Basic Auth:
+            import base64
+            auth_string = f"{self.client_id}:{self.client_secret}"
+            encoded_auth = base64.b64encode(auth_string.encode()).decode()
+            self.headers["Authorization"] = f"Basic {encoded_auth}"
 
     def get_products(self, limit=20):
         """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
