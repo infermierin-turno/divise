@@ -33,8 +33,8 @@ class ShopifyCoffeeAgent:
             print(f"Errore nel recupero prodotti: {response.status_code} - {response.text}")
             return []
 
-    def optimize_coffee_content(self, title, current_body):
-        """Usa l'IA per generare HTML del corpo, Meta Title e Meta Description ottimizzati SEO."""
+    def optimize_divise_content(self, title, current_body):
+        """Usa l'IA per generare HTML del corpo, Meta Title e Meta Description ottimizzati SEO per le divise."""
         system_prompt = """
 Sei un assistente specializzato ed esperto di abbigliamento professionale e divise per sanità, estetica, sala, cucina e hospitality. 
 La tua voce è professionale, concreta e rassicurante. Parla come una persona esperta del settore, non come un testo promozionale. 
