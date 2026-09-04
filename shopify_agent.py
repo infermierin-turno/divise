@@ -4,33 +4,50 @@ import requests
 from openai import OpenAI
 
 class ShopifyCoffeeAgent:
-    def __init__(self, shop_url, openai_api_key, access_token=None, client_secret=None, **kwargs):
+    def __init__(self, shop_url, openai_api_key, client_id=None, client_secret=None, access_token=None, **kwargs):
         self.shop_url = shop_url.rstrip('/')
         self.ai_client = OpenAI(api_key=openai_api_key)
         
-        # Recupera il token o la chiave segreta dalle variabili d'ambiente, dai parametri o da eventuali argomenti extra
-        self.token_or_secret = (
-            access_token or 
-            client_secret or 
-            kwargs.get("client_id") or
-            os.getenv("SHOPIFY_ACCESS_TOKEN") or 
-            os.getenv("SHOPIFY_CLIENT_SECRET") or
-            os.getenv("SHOPIFY_SECRET")
-        )
+        self.client_id = client_id or os.getenv("SHOPIFY_CLIENT_ID") or os.getenv("SHOPIFY_API_KEY")
+        self.client_secret = client_secret or os.getenv("SHOPIFY_CLIENT_SECRET") or os.getenv("SHOPIFY_SECRET")
+        self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
+        
+        # Se abbiamo client_id e client_secret (shpss_), otteniamo il token dinamico
+        self.token = self.access_token
+        if not self.token and self.client_id and self.client_secret:
+            self.token = self._fetch_oauth_token()
 
         self.headers = {
             "Content-Type": "application/json",
-            "X-Shopify-Access-Token": self.token_or_secret if self.token_or_secret else ""
+            "X-Shopify-Access-Token": self.token if self.token else ""
         }
+
+    def _fetch_oauth_token(self):
+        """Ottiene un token di accesso temporaneo scambiando Client ID e Client Secret."""
+        auth_url = f"https://{self.shop_url.replace('https://', '').replace('http://', '')}/admin/oauth/access_token"
+        payload = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret
+        }
+        try:
+            response = requests.post(auth_url, json=payload)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("access_token")
+            else:
+                print(f"[ERRORE OAUTH] Impossibile ottenere il token: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            print(f"[ERRORE OAUTH] Eccezione durante la richiesta token: {e}")
+            return None
 
     def get_products(self, limit=20):
         """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
-        # Aggiungiamo status=any per assicurarci di intercettare i prodotti indipendentemente dallo stato
         url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
         response = requests.get(url, headers=self.headers)
         
         print(f"[DEBUG SHOPIFY] Status Code Risposta: {response.status_code}")
-        print(f"[DEBUG SHOPIFY] Contenuto Risposta: {response.text[:300]}") # Stampa i primi 300 caratteri per diagnostica
+        print(f"[DEBUG SHOPIFY] Contenuto Risposta: {response.text[:300]}")
         
         if response.status_code == 200:
             return response.json().get("products", [])
@@ -46,7 +63,7 @@ La tua voce è professionale, concreta e rassicurante. Parla come una persona es
 Il tono è cortese ma diretto, con frasi brevi e utili. Focalizzati su comfort, vestibilità, resistenza ai lavaggi, tessuti, sicurezza, praticità e personalizzazione (valori del made in Italy dal 2007). 
 Elimina qualsiasi superlativo inutile, aggettivi in fila o frasi 'da vetrina'.
 
-REGOLE TASSATIVE PER OBIETTIVO OUTPUT:
+REGOLE TASSATIVE PER L'OUTPUT:
 Devi restituire esclusivamente un oggetto JSON valido (senza blocchi di markdown ```json o altro, solo il testo grezzo JSON) con questa struttura esatta:
 {
   "seo_title": "Stringa di massimo 55-60 caratteri, ottimizzata per Google e per il click",
