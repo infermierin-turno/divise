@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
@@ -25,7 +26,7 @@ def preview_shopify_descriptions():
 
     products = agent.get_products(limit=20)
     if not products:
-        return "<h3>[AVVISO] Nessun prodotto trovato su Shopify.</h3>"
+        return "<h3>[AVVISO] Nessun prodotto trovato su Shopify. Controlla le credenziali o i permessi (read_products).</h3>"
 
     tag_filtro = "Ottimizzato IA"
     prodotti_da_elaborare = []
