@@ -24,14 +24,18 @@ class ShopifyCoffeeAgent:
         }
 
     def get_products(self, limit=20):
-        """Recupera l'elenco dei prodotti dal negozio Shopify."""
-        url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}"
+        """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
+        # Aggiungiamo status=any per assicurarci di intercettare i prodotti indipendentemente dallo stato
+        url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
         response = requests.get(url, headers=self.headers)
+        
+        print(f"[DEBUG SHOPIFY] Status Code Risposta: {response.status_code}")
+        print(f"[DEBUG SHOPIFY] Contenuto Risposta: {response.text[:300]}") # Stampa i primi 300 caratteri per diagnostica
         
         if response.status_code == 200:
             return response.json().get("products", [])
         else:
-            print(f"Errore nel recupero prodotti: {response.status_code} - {response.text}")
+            print(f"[ERRORE] Impossibile recuperare i prodotti: {response.status_code} - {response.text}")
             return []
 
     def optimize_divise_content(self, title, current_body):
@@ -42,7 +46,7 @@ La tua voce è professionale, concreta e rassicurante. Parla come una persona es
 Il tono è cortese ma diretto, con frasi brevi e utili. Focalizzati su comfort, vestibilità, resistenza ai lavaggi, tessuti, sicurezza, praticità e personalizzazione (valori del made in Italy dal 2007). 
 Elimina qualsiasi superlativo inutile, aggettivi in fila o frasi 'da vetrina'.
 
-REGOLE TASSATIVE PER L'OUTPUT:
+REGOLE TASSATIVE PER OBIETTIVO OUTPUT:
 Devi restituire esclusivamente un oggetto JSON valido (senza blocchi di markdown ```json o altro, solo il testo grezzo JSON) con questa struttura esatta:
 {
   "seo_title": "Stringa di massimo 55-60 caratteri, ottimizzata per Google e per il click",
