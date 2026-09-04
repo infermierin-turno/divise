@@ -4,14 +4,15 @@ import requests
 from openai import OpenAI
 
 class ShopifyCoffeeAgent:
-    def __init__(self, shop_url, openai_api_key, access_token=None, client_secret=None):
+    def __init__(self, shop_url, openai_api_key, access_token=None, client_secret=None, **kwargs):
         self.shop_url = shop_url.rstrip('/')
         self.ai_client = OpenAI(api_key=openai_api_key)
         
-        # Recupera il token o la chiave segreta dalle variabili d'ambiente o dai parametri
+        # Recupera il token o la chiave segreta dalle variabili d'ambiente, dai parametri o da eventuali argomenti extra
         self.token_or_secret = (
             access_token or 
             client_secret or 
+            kwargs.get("client_id") or
             os.getenv("SHOPIFY_ACCESS_TOKEN") or 
             os.getenv("SHOPIFY_CLIENT_SECRET") or
             os.getenv("SHOPIFY_SECRET")
