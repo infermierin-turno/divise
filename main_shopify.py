@@ -7,6 +7,10 @@ from shopify_agent import ShopifyCoffeeAgent
 
 app = FastAPI()
 
+@app.get("/health", response_class=HTMLResponse)
+def health_check():
+    return "Divise API Running"
+
 @app.get("/", response_class=HTMLResponse)
 def preview_shopify_descriptions():
     shop_url = os.getenv("SHOP_URL")
@@ -15,7 +19,7 @@ def preview_shopify_descriptions():
     openai_api_key = os.getenv("OPENAI_API_KEY")
 
     if not shop_url or not client_id or not client_secret or not openai_api_key:
-        return "<h3>[ERRORE] Mancano una o più variabili d'ambiente richieste.</h3>"
+        return "<h3>[ERRORE] Mancano una o più variabili d'ambiente richieste su Render.</h3>"
 
     agent = ShopifyCoffeeAgent(
         shop_url=shop_url,
@@ -26,7 +30,7 @@ def preview_shopify_descriptions():
 
     products = agent.get_products(limit=20)
     if not products:
-        return "<h3>[AVVISO] Nessun prodotto trovato su Shopify. Controlla le credenziali o i permessi (read_products).</h3>"
+        return "<h3>[AVVISO] Nessun prodotto trovato su Shopify. Verifica che l'app sia installata correttamente e che i permessi 'read_products' siano attivi.</h3>"
 
     tag_filtro = "Ottimizzato IA"
     prodotti_da_elaborare = []
