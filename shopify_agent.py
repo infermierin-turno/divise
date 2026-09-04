@@ -4,43 +4,23 @@ import requests
 from openai import OpenAI
 
 class ShopifyCoffeeAgent:
-    def __init__(self, shop_url, client_id, client_secret, openai_api_key):
+    def __init__(self, shop_url, openai_api_key, access_token=None, client_secret=None):
         self.shop_url = shop_url.rstrip('/')
-        self.client_id = client_id
-        self.client_secret = client_secret
         self.ai_client = OpenAI(api_key=openai_api_key)
         
-        # Genera il token di accesso usando le credenziali OAuth
-        self.access_token = self._get_admin_access_token()
-        
+        # Recupera il token o la chiave segreta dalle variabili d'ambiente o dai parametri
+        self.token_or_secret = (
+            access_token or 
+            client_secret or 
+            os.getenv("SHOPIFY_ACCESS_TOKEN") or 
+            os.getenv("SHOPIFY_CLIENT_SECRET") or
+            os.getenv("SHOPIFY_SECRET")
+        )
+
         self.headers = {
             "Content-Type": "application/json",
-            "X-Shopify-Access-Token": self.access_token if self.access_token else ""
+            "X-Shopify-Access-Token": self.token_or_secret if self.token_or_secret else ""
         }
-
-    def _get_admin_access_token(self):
-        """Ottiene dinamicamente il token di accesso admin usando Client ID e Client Secret."""
-        auth_url = f"{self.shop_url}/admin/oauth/access_token"
-        payload = {
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-            "grant_type": "client_credentials"
-        }
-        
-        try:
-            # NOTA: Usiamo data=payload perché Shopify richiede form-urlencoded per l'endpoint oauth
-            response = requests.post(auth_url, data=payload)
-            if response.status_code == 200:
-                data = response.json()
-                token = data.get("access_token")
-                print("[SUCCESSO] Token di accesso Shopify generato correttamente.")
-                return token
-            else:
-                print(f"[AVVISO] OAuth standard non riuscito ({response.status_code}: {response.text}).")
-                return self.client_secret
-        except Exception as e:
-            print(f"Errore durante la richiesta del token Shopify: {e}")
-            return None
 
     def get_products(self, limit=20):
         """Recupera l'elenco dei prodotti dal negozio Shopify."""
