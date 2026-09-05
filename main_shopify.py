@@ -4,15 +4,17 @@ from shopify_agent import ShopifyCoffeeAgent
 
 app = FastAPI(title="Shopify Divise SEO & AI Agent")
 
-# Inizializzazione dell'agente con le variabili d'ambiente di Render
-shop_url = os.getenv("SHOPIFY_SHOP_URL", "https://divisedivise.it")
+# Legge correttamente la variabile SHOP_URL configurata su Render (fallback su divisedivise.it)
+shop_url = os.getenv("SHOP_URL") or os.getenv("SHOPIFY_SHOP_URL", "https://divisedivise.it")
 openai_api_key = os.getenv("OPENAI_API_KEY")
-access_token = os.getenv("SHOPIFY_ACCESS_TOKEN")
+client_id = os.getenv("SHOPIFY_CLIENT_ID")
+client_secret = os.getenv("SHOPIFY_CLIENT_SECRET")
 
 agent = ShopifyCoffeeAgent(
     shop_url=shop_url,
     openai_api_key=openai_api_key,
-    access_token=access_token
+    client_id=client_id,
+    client_secret=client_secret
 )
 
 @app.get("/")
@@ -46,7 +48,6 @@ def optimize_products(limit: int = 10):
         title = p.get("title")
         body = p.get("body_html") or ""
         
-        # Generazione dei contenuti ottimizzati tramite IA
         seo_data = agent.optimize_divise_content(title, body)
         if seo_data:
             success = agent.update_product_seo_and_description(prod_id, seo_data)
