@@ -5,7 +5,7 @@ from shopify_agent import ShopifyCoffeeAgent
 
 app = FastAPI(title="Shopify Divise SEO & AI Agent")
 
-shop_url = os.getenv("SHOP_URL") or "https://1a6ed6.myshopify.com"
+shop_url = os.getenv("SHOP_URL") or "[https://1a6ed6.myshopify.com](https://1a6ed6.myshopify.com)"
 openai_api_key = os.getenv("OPENAI_API_KEY")
 client_id = os.getenv("SHOPIFY_CLIENT_ID")
 client_secret = os.getenv("SHOPIFY_CLIENT_SECRET")
@@ -19,24 +19,39 @@ agent = ShopifyCoffeeAgent(
 
 @app.get("/")
 def read_root():
-    """Verifica lo stato del servizio e testa il recupero dei prodotti da Shopify."""
+    """Panoramica dei comandi disponibili per il controllo umano."""
+    return {
+        "status": "online",
+        "shop": shop_url,
+        "azioni_disponibili": {
+            "1_mostra_primi_tre_da_ottimizzare": "/pending-products",
+            "2_anteprima_correzione": "/preview/{product_id}",
+            "3_approva_e_applica": "/apply/{product_id}"
+        }
+    }
+
+@app.get("/pending-products")
+def get_pending_products():
+    """Mostra i primi tre articoli in sospeso (escludendo quelli con tag 'Ottimizzato IA')."""
     try:
-        products = agent.get_products(limit=5)
+        pending = agent.get_pending_products(limit=3)
         return {
-            "status": "online",
-            "shop": shop_url,
-            "products_count_retrieved": len(products) if products else 0,
-            "products_preview": [{"id": p.get("id"), "title": p.get("title")} for p in products] if products else []
+            "status": "success",
+            "count": len(pending),
+            "products_to_optimize": [
+                {
+                    "id": p.get("id"),
+                    "title": p.get("title"),
+                    "preview_link": f"/preview/{p.get('id')}"
+                } for p in pending
+            ]
         }
     except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/optimize/{product_id}")
-def optimize_single_product(product_id: str):
-    """Ottimizza SEO e descrizione HTML per uno specifico prodotto tramite IA (tramite GET per test da browser)."""
+@app.get("/preview/{product_id}")
+def preview_product_optimization(product_id: str):
+    """Mostra l'anteprima della correzione IA per un prodotto specifico senza scriverla su Shopify."""
     try:
         url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
         response = requests.get(url, headers=agent.headers)
@@ -50,54 +65,48 @@ def optimize_single_product(product_id: str):
         
         seo_data = agent.optimize_divise_content(title, current_body)
         if not seo_data:
-            raise HTTPException(status_code=500, detail="Errore durante la generazione dei contenuti SEO con l'IA.")
+            raise HTTPException(status_code=500, detail="Errore durante la generazione dell'anteprima IA.")
         
-        success = agent.update_product_seo_and_description(product_id, seo_data)
-        if success:
-            return {
-                "status": "success",
-                "product_id": product_id,
-                "title": title,
-                "optimized_data": seo_data
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Errore durante l'aggiornamento del prodotto su Shopify.")
+        return {
+            "status": "preview_ready",
+            "product_id": product_id,
+            "original_title": title,
+            "original_body_html": current_body,
+            "proposed_optimization": seo_data,
+            "approva_e_scrivi_link": f"/apply/{product_id}"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/optimize-all")
-def optimize_all_products(limit: int = 1):
-    """Ottimizza in blocco i primi N prodotti del catalogo (tramite GET per test da browser)."""
+@app.get("/apply/{product_id}")
+def apply_product_optimization(product_id: str):
+    """Approva l'anteprima: aggiorna Shopify e applica il tag 'Ottimizzato IA' per saltarlo in futuro."""
     try:
-        products = agent.get_products(limit=limit)
-        results = []
+        url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
+        response = requests.get(url, headers=agent.headers)
         
-        for p in products:
-            prod_id = str(p.get("id"))
-            title = p.get("title", "")
-            current_body = p.get("body_html", "") or ""
-            
-            seo_data = agent.optimize_divise_content(title, current_body)
-            if seo_data:
-                success = agent.update_product_seo_and_description(prod_id, seo_data)
-                results.append({
-                    "product_id": prod_id,
-                    "title": title,
-                    "success": success,
-                    "optimized_data": seo_data if success else None
-                })
-            else:
-                results.append({
-                    "product_id": prod_id,
-                    "title": title,
-                    "success": False,
-                    "error": "Fallita generazione IA"
-                })
-                
-        return {
-            "status": "completed",
-            "total_processed": len(results),
-            "results": results
-        }
+        if response.status_code != 200:
+            raise HTTPException(status_code=404, detail="Prodotto non trovato su Shopify.")
+        
+        product_data = response.json().get("product", {})
+        title = product_data.get("title", "")
+        current_body = product_data.get("body_html", "") or ""
+        
+        seo_data = agent.optimize_divise_content(title, current_body)
+        if not seo_data:
+            raise HTTPException(status_code=500, detail="Errore durante la generazione SEO.")
+        
+        success = agent.update_product_seo_and_description(product_id, seo_data, tag_to_add="Ottimizzato IA")
+        if success:
+            return {
+                "status": "approved_and_applied",
+                "product_id": product_id,
+                "title": title,
+                "applied_data": seo_data,
+                "tag_added": "Ottimizzato IA",
+                "next_step": "Vai su /pending-products per vedere i prossimi articoli."
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Errore durante l'aggiornamento su Shopify.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
