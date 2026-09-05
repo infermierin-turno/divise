@@ -104,29 +104,76 @@ class ShopifyCoffeeAgent:
         return pending
 
     def optimize_divise_content(self, title, current_body):
-        """Usa l'IA per generare HTML del corpo, Meta Title e Meta Description ottimizzati SEO per le divise."""
-        system_prompt = """
-Sei un assistente specializzato ed esperto di abbigliamento professionale e divise per sanità, estetica, sala, cucina e hospitality. 
-La tua voce è professionale, concreta e rassicurante. Parla come una persona esperta del settore, non come un testo promozionale. 
-Il tono è cortese ma diretto, con frasi brevi e utili. Focalizzati su comfort, vestibilità, resistenza ai lavaggi, tessuti, sicurezza, praticità e personalizzazione (valori del made in Italy dal 2007). 
-Elimina qualsiasi superlativo inutile, aggettivi in fila o frasi 'da vetrina'.
+        """Usa l'IA con le nuove regole di rigore e formato JSON nativo per generare i contenuti ottimizzati."""
+        system_prompt = """Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
+
+Scrivi descrizioni per un e-commerce professionale. La voce del brand è competente, concreta, affidabile e rassicurante. Il tono è professionale ma naturale, diretto e comprensibile. Usa frasi brevi, verbi attivi e informazioni utili per aiutare il cliente nella scelta.
+
+Metti in evidenza, solo quando sono presenti nella descrizione originale o nel nome del prodotto:
+- comfort e libertà di movimento;
+- vestibilità;
+- tessuti e composizione;
+- resistenza ai lavaggi;
+- facilità di manutenzione;
+- tasche, chiusure, elasticità e dettagli funzionali;
+- utilizzo professionale consigliato;
+- possibilità di personalizzazione;
+- spedizone gratis per ordini superiori a €79.
+
+REGOLA FONDAMENTALE:
+Non inventare mai caratteristiche, materiali, certificazioni, proprietà tecniche, vestibilità, colori, misure o prestazioni non presenti nelle informazioni fornite.
+
+Non descrivere un prodotto come antibatterico, antimacchia, ignifugo, impermeabile, elasticizzato, certificato, traspirante o adatto a uno specifico utilizzo se queste caratteristiche non sono esplicitamente indicate.
+
+Se un'informazione non è disponibile, omettila. Non fare supposizioni e non presentare come certe informazioni generiche normalmente associate a quel tipo di prodotto.
+
+Il Made in Italy e l'esperienza dal 2007 possono essere citati come valori aziendali generali, ma non devi affermare che il singolo prodotto sia Made in Italy se questo non è indicato nella descrizione originale.
+
+Evita:
+- superlativi inutili;
+- aggettivi accumulati;
+- frasi da catalogo o da vetrina;
+- promesse assolute;
+- affermazioni vaghe o non verificabili;
+- ripetizioni del nome del prodotto;
+- contenuti promozionali eccessivi.
+
+La descrizione HTML deve essere ordinata e leggibile e può contenere:
+- un'introduzione con <p>;
+- titoli <h2> descrittivi;
+- elenchi puntati con <ul> e <li>;
+- parole importanti in <strong>.
+
+Non utilizzare <h1>. Non inserire markdown, link, emoji, shortcode o codice JavaScript.
+
+REGOLE SEO:
+- seo_title: massimo 60 caratteri, chiaro e descrittivo;
+- seo_description: idealmente tra 140 e 155 caratteri, naturale e utile per il cliente;
+- non inserire parole chiave in modo artificiale;
+- non usare promesse non dimostrabili;
+- non aggiungere il brand se non è presente nelle informazioni fornite.
 
 REGOLE TASSATIVE PER L'OUTPUT:
-Devi restituire esclusivamente un oggetto JSON valido (senza blocchi di markdown ```json o altro, solo il testo grezzo JSON) con questa struttura esatta:
+Devi restituire esclusivamente un oggetto JSON valido con questa struttura esatta:
 {
-  "seo_title": "Stringa di massimo 55-60 caratteri, ottimizzata per Google e per il click",
-  "seo_description": "Stringa tra i 140 e i 155 caratteri, persuasiva e ricca di valore per i clienti",
-  "body_html": "Il codice HTML puro (strutturato con <h2>, <p>, <ul>, <li>, <strong>) con la descrizione dettagliata"
-}
-
-Non aggiungere alcun testo prima o dopo il JSON.
-"""
+  "seo_title": "Titolo SEO",
+  "seo_description": "Descrizione SEO",
+  "body_html": "<p>Descrizione HTML...</p>"
+}"""
 
         user_prompt = f"""
-Ottimizza il seguente prodotto per il nostro e-commerce di divise professionali.
-        
-Nome Prodotto: {title}
-Descrizione Attuale: {current_body}
+Analizza e riscrivi il seguente prodotto per il nostro e-commerce di abbigliamento professionale.
+
+Nome prodotto:
+{title}
+
+Descrizione attuale:
+{current_body or "Nessuna descrizione disponibile"}
+
+Usa le informazioni disponibili nella descrizione attuale come fonte principale.
+Mantieni tutti i dati tecnici corretti già presenti, ma elimina ripetizioni, frasi generiche e formulazioni poco utili.
+
+Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senza inventare dettagli.
 """
 
         try:
@@ -136,16 +183,10 @@ Descrizione Attuale: {current_body}
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.7
+                temperature=0.5,
+                response_format={"type": "json_object"}
             )
             raw_content = response.choices[0].message.content.strip()
-            
-            if raw_content.startswith("```"):
-                raw_content = raw_content.split("```")[1]
-                if raw_content.startswith("json"):
-                    raw_content = raw_content[4:].strip()
-                raw_content = raw_content.rstrip("`").strip()
-
             data = json.loads(raw_content)
             return data
         except Exception as e:
@@ -153,37 +194,68 @@ Descrizione Attuale: {current_body}
             return None
 
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
-        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e aggiunge il tag per saltarlo in futuro."""
-        get_url = f"{self.shop_url}/admin/api/2024-07/products/{product_id}.json"
-        get_resp = requests.get(get_url, headers=self.headers)
+        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e aggiunge il tag tramite GraphQL."""
+        graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
-        current_tags_str = ""
-        if get_resp.status_code == 200:
-            product_data = get_resp.json().get("product", {})
-            current_tags_str = product_data.get("tags", "")
-
-        tags_list = [t.strip() for t in current_tags_str.split(",")] if current_tags_str else []
+        get_query = f"""
+        {{
+          product(id: "gid://shopify/Product/{product_id}") {{
+            tags
+          }}
+        }}
+        """
+        resp = requests.post(graphql_url, json={"query": get_query}, headers=self.headers)
+        tags_list = []
+        if resp.status_code == 200:
+            node = resp.json().get("data", {}).get("product", {})
+            if node and node.get("tags"):
+                tags_list = node.get("tags")
+        
         if tag_to_add not in tags_list:
             tags_list.append(tag_to_add)
-        
-        updated_tags_str = ", ".join(tags_list)
 
-        put_url = f"{self.shop_url}/admin/api/2024-07/products/{product_id}.json"
-        payload = {
-            "product": {
-                "id": product_id,
-                "body_html": seo_data.get("body_html"),
-                "metafields_global_title_tag": seo_data.get("seo_title"),
-                "metafields_global_description_tag": seo_data.get("seo_description"),
-                "tags": updated_tags_str
+        mutation = """
+        mutation productUpdate($input: ProductInput!) {
+          productUpdate(input: $input) {
+            product {
+              id
+              title
+              tags
+              seo {
+                title
+                description
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+        """
+        
+        variables = {
+            "input": {
+                "id": f"gid://shopify/Product/{product_id}",
+                "descriptionHtml": seo_data.get("body_html"),
+                "tags": tags_list,
+                "seo": {
+                    "title": seo_data.get("seo_title"),
+                    "description": seo_data.get("seo_description")
+                }
             }
         }
         
-        response = requests.put(put_url, json=payload, headers=self.headers)
+        response = requests.post(graphql_url, json={"query": mutation, "variables": variables}, headers=self.headers)
         
         if response.status_code == 200:
-            print(f"[SUCCESSO] Prodotto ID {product_id} ottimizzato e taggato con '{tag_to_add}'!")
+            result_data = response.json()
+            user_errors = result_data.get("data", {}).get("productUpdate", {}).get("userErrors", [])
+            if user_errors:
+                print(f"[ERRORE GRAPHQL] {user_errors}")
+                return False
+            print(f"[SUCCESSO] Prodotto ID {product_id} aggiornato e taggato via GraphQL!")
             return True
         else:
-            print(f"[ERRORE] Impossibile aggiornare il prodotto {product_id}: {response.text}")
+            print(f"[ERRORE HTTP] Impossibile aggiornare il prodotto {product_id}: {response.text}")
             return False
