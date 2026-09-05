@@ -1,196 +1,134 @@
 import os
 import json
+import base64
 import requests
-from fastapi import FastAPI, Form
-from fastapi.responses import HTMLResponse
-from shopify_agent import ShopifyCoffeeAgent
+from openai import OpenAI
 
-app = FastAPI()
-
-@app.get("/health", response_class=HTMLResponse)
-def health_check():
-    return "Divise API Running"
-
-@app.get("/", response_class=HTMLResponse)
-def preview_shopify_descriptions():
-    shop_url = os.getenv("SHOP_URL")
-    client_id = os.getenv("SHOPIFY_CLIENT_ID")
-    client_secret = os.getenv("SHOPIFY_CLIENT_SECRET")
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-
-    if not shop_url or not client_id or not client_secret or not openai_api_key:
-        return "<h3>[ERRORE] Mancano una o più variabili d'ambiente richieste su Render.</h3>"
-
-    agent = ShopifyCoffeeAgent(
-        shop_url=shop_url,
-        client_id=client_id,
-        client_secret=client_secret,
-        openai_api_key=openai_api_key
-    )
-
-    products = agent.get_products(limit=20)
-    if not products:
-        return "<h3>[AVVISO] Nessun prodotto trovato su Shopify. Verifica che l'app sia installata correttamente e che i permessi 'read_products' siano attivi.</h3>"
-
-    tag_filtro = "Ottimizzato IA"
-    prodotti_da_elaborare = []
-
-    for product in products:
-        tags_raw = product.get("tags", "")
-        tags_list = [t.strip() for t in tags_raw.split(",")] if isinstance(tags_raw, str) else (tags_raw or [])
-        if tag_filtro not in tags_list:
-            prodotti_da_elaborare.append(product)
-
-    if not prodotti_da_elaborare:
-        return """
-        <div style="font-family: Arial; margin: 40px; text-align: center;">
-            <h2 style="color: #059669;">Tutti i prodotti analizzati hanno già il tag 'Ottimizzato IA'!</h2>
-            <p>Ottimo lavoro, il catalogo delle divise è completamente aggiornato.</p>
-        </div>
-        """
-
-    batch = prodotti_da_elaborare[:3]
-
-    html_content = """
-    <html>
-        <head>
-            <title>Anteprima e Ottimizzazione SEO & IA Divise</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; background: #f9f9f9; color: #333; }
-                .product-box { background: #fff; border: 1px solid #ddd; padding: 25px; margin-bottom: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-                h2 { color: #1e3a8a; font-size: 20px; }
-                .preview-section { display: flex; gap: 20px; margin-top: 15px; }
-                .column { flex: 1; background: #fdfdfd; border: 1px solid #eee; padding: 15px; border-radius: 6px; overflow-x: auto; max-height: 250px; }
-                .column h4 { margin-top: 0; color: #555; border-bottom: 2px solid #ddd; padding-bottom: 8px; }
-                .seo-box { background: #e0f2fe; border: 1px solid #bae6fd; padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; }
-                .btn-container { text-align: center; margin-top: 40px; }
-                .btn-apply { background-color: #2563eb; color: white; padding: 14px 28px; font-size: 16px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-                .btn-apply:hover { background-color: #1d4ed8; }
-            </style>
-        </head>
-        <body>
-            <h1>Anteprima Batch Corrente (3 Divise - SEO & IA)</h1>
-            <p>Verifica i meta tag e le descrizioni tecniche generate dall'IA. Cliccando su "Applica Modifiche", il sistema aggiornerà Shopify con i dati SEO completi e il tag <strong>Ottimizzato IA</strong>.</p>
-            <form action="/applica-batch" method="POST">
-    """
-
-    for product in batch:
-        product_id = product.get("id")
-        title = product.get("title")
-        current_body = product.get("body_html", "")
+class ShopifyCoffeeAgent:
+    def __init__(self, shop_url, openai_api_key, client_id=None, client_secret=None, access_token=None, **kwargs):
+        self.shop_url = shop_url.rstrip('/')
+        self.ai_client = OpenAI(api_key=openai_api_key)
         
-        seo_data = agent.optimize_divise_content(title, current_body)
-        if not seo_data:
-            seo_data = {
-                "seo_title": title,
-                "seo_description": "",
-                "body_html": current_body
-            }
+        self.client_id = client_id or os.getenv("SHOPIFY_CLIENT_ID") or os.getenv("SHOPIFY_API_KEY")
+        self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
+        
+        self.headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # Gestione dei token con prefisso atkn_ o shpat_
+        if self.access_token:
+            if self.access_token.startswith("atkn_"):
+                # Se è un token di tipo atkn_, verifichiamo se va passato come Bearer o come X-Shopify-Access-Token.
+                # Di solito i token personalizzati funzionano come Bearer o con header dedicati. 
+                # Proviamo a passarli come Bearer o X-Shopify-Access-Token a seconda del gateway.
+                self.headers["Authorization"] = f"Bearer {self.access_token}"
+                # In alternativa, se Shopify non lo riconosce, prova a metterlo come X-Shopify-Access-Token
+                # self.headers["X-Shopify-Access-Token"] = self.access_token
+            elif self.access_token.startswith("shpat_"):
+                self.headers["X-Shopify-Access-Token"] = self.access_token
+            else:
+                self.headers["X-Shopify-Access-Token"] = self.access_token
+        elif self.client_id and self.client_secret:
+            auth_string = f"{self.client_id}:{self.client_secret}"
+            encoded_auth = base64.b64encode(auth_string.encode()).decode()
+            self.headers["Authorization"] = f"Basic {encoded_auth}"
 
-        cleaned_html = seo_data.get("body_html", "").replace("```html", "").replace("```", "").strip()
-        seo_title = seo_data.get("seo_title", "")
-        seo_desc = seo_data.get("seo_description", "")
+    def get_products(self, limit=20):
+        """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
+        url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
+        response = requests.get(url, headers=self.headers)
+        
+        print(f"[DEBUG SHOPIFY] Status Code Risposta: {response.status_code}")
+        print(f"[DEBUG SHOPIFY] Contenuto Risposta: {response.text[:300]}")
+        
+        if response.status_code == 200:
+            return response.json().get("products", [])
+        else:
+            print(f"[ERRORE] Impossibile recuperare i prodotti: {response.status_code} - {response.text}")
+            return []
 
-        html_content += f"""
-            <div class="product-box">
-                <h2>{title} (ID: {product_id})</h2>
-                <input type="hidden" name="product_ids" value="{product_id}">
-                <input type="hidden" name="product_titles" value="{title}">
-                <input type="hidden" name="seo_titles" value="{seo_title.replace('"', '&quot;')}">
-                <input type="hidden" name="seo_descriptions" value="{seo_desc.replace('"', '&quot;')}">
-                <input type="hidden" name="optimized_bodies" value="{cleaned_html.replace('"', '&quot;')}">
-                
-                <div class="seo-box">
-                    <strong>Meta Title ({len(seo_title)} caratteri):</strong> {seo_title}<br><br>
-                    <strong>Meta Description ({len(seo_desc)} caratteri):</strong> {seo_desc}
-                </div>
+    def optimize_divise_content(self, title, current_body):
+        """Usa l'IA per generare HTML del corpo, Meta Title e Meta Description ottimizzati SEO per le divise."""
+        system_prompt = """
+Sei un assistente specializzato ed esperto di abbigliamento professionale e divise per sanità, estetica, sala, cucina e hospitality. 
+La tua voce è professionale, concreta e rassicurante. Parla come una persona esperta del settore, non come un testo promozionale. 
+Il tono è cortese ma diretto, con frasi brevi e utili. Focalizzati su comfort, vestibilità, resistenza ai lavaggi, tessuti, sicurezza, praticità e personalizzazione (valori del made in Italy dal 2007). 
+Elimina qualsiasi superlativo inutile, aggettivi in fila o frasi 'da vetrina'.
 
-                <div class="preview-section">
-                    <div class="column">
-                        <h4>Descrizione Attuale</h4>
-                        <div>{current_body if current_body else '<em>Nessuna descrizione presente</em>'}</div>
-                    </div>
-                    <div class="column">
-                        <h4>Nuova Anteprima HTML Generata</h4>
-                        <div>{cleaned_html}</div>
-                    </div>
-                </div>
-            </div>
-        """
+REGOLE TASSATIVE PER L'OUTPUT:
+Devi restituire esclusivamente un oggetto JSON valido (senza blocchi di markdown ```json o altro, solo il testo grezzo JSON) con questa struttura esatta:
+{
+  "seo_title": "Stringa di massimo 55-60 caratteri, ottimizzata per Google e per il click",
+  "seo_description": "Stringa tra i 140 e i 155 caratteri, persuasiva e ricca di valore per i clienti",
+  "body_html": "Il codice HTML puro (strutturato con <h2>, <p>, <ul>, <li>, <strong>) con la descrizione dettagliata"
+}
 
-    html_content += """
-                <div class="btn-container">
-                    <button type="submit" class="btn-apply">🚀 Applica SEO, HTML e Passa ai Successivi 3</button>
-                </div>
-            </form>
-        </body>
-    </html>
-    """
+Non aggiungere alcun testo prima o dopo il JSON.
+"""
 
-    return html_content
+        user_prompt = f"""
+Ottimizza il seguente prodotto per il nostro e-commerce di divise professionali.
+        
+Nome Prodotto: {title}
+Descrizione Attuale: {current_body}
+"""
 
-
-@app.post("/applica-batch", response_class=HTMLResponse)
-def applica_batch(
-    product_ids: list[str] = Form(...), 
-    product_titles: list[str] = Form(...), 
-    seo_titles: list[str] = Form(...),
-    seo_descriptions: list[str] = Form(...),
-    optimized_bodies: list[str] = Form(...)
-):
-    shop_url = os.getenv("SHOP_URL")
-    client_id = os.getenv("SHOPIFY_CLIENT_ID")
-    client_secret = os.getenv("SHOPIFY_CLIENT_SECRET")
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-
-    agent = ShopifyCoffeeAgent(
-        shop_url=shop_url,
-        client_id=client_id,
-        client_secret=client_secret,
-        openai_api_key=openai_api_key
-    )
-
-    risultati_html = """
-    <html>
-        <head>
-            <title>Risultato Aggiornamento Shopify</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; background: #f9f9f9; color: #333; }
-                .success-box { background: #fff; border-left: 6px solid #059669; padding: 20px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; }
-                a { display: inline-block; margin-top: 20px; background-color: #059669; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; }
-                a:hover { background-color: #047857; }
-            </style>
-        </head>
-        <body>
-            <h1>Risultato Applicazione Batch (Divise - SEO & HTML)</h1>
-    """
-
-    for pid, title, s_title, s_desc, n_body in zip(product_ids, product_titles, seo_titles, seo_descriptions, optimized_bodies):
         try:
-            seo_payload = {
-                "seo_title": s_title,
-                "seo_description": s_desc,
-                "body_html": n_body
-            }
-            agent.update_product_seo_and_description(pid, seo_payload, tag_to_add="Ottimizzato IA")
-            risultati_html += f"""
-                <div class="success-box">
-                    <h3 style="color: #059669; margin-top: 0;">Aggiornato con successo: {title}</h3>
-                    <p>ID Shopify: {pid} — Meta Title, Meta Description e Tag 'Ottimizzato IA' applicati correttamente.</p>
-                </div>
-            """
+            response = self.ai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7
+            )
+            raw_content = response.choices[0].message.content.strip()
+            
+            if raw_content.startswith("```"):
+                raw_content = raw_content.split("```")[1]
+                if raw_content.startswith("json"):
+                    raw_content = raw_content[4:].strip()
+                raw_content = raw_content.rstrip("`").strip()
+
+            data = json.loads(raw_content)
+            return data
         except Exception as e:
-            risultati_html += f"""
-                <div class="success-box" style="border-left-color: #dc2626;">
-                    <h3 style="color: #dc2626; margin-top: 0;">Errore per: {title}</h3>
-                    <p>Dettaglio errore: {str(e)}</p>
-                </div>
-            """
+            print(f"Errore durante la generazione o il parsing JSON dall'IA: {e}")
+            return None
 
-    risultati_html += """
-            <a href="/">🔄 Torna all'anteprima per elaborare le prossime 3 divise</a>
-        </body>
-    </html>
-    """
+    def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
+        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag."""
+        get_url = f"{self.shop_url}/admin/api/2024-01/products/{product_id}.json"
+        get_resp = requests.get(get_url, headers=self.headers)
+        
+        current_tags_str = ""
+        if get_resp.status_code == 200:
+            product_data = get_resp.json().get("product", {})
+            current_tags_str = product_data.get("tags", "")
 
-    return risultati_html
+        tags_list = [t.strip() for t in current_tags_str.split(",")] if current_tags_str else []
+        if tag_to_add not in tags_list:
+            tags_list.append(tag_to_add)
+        
+        updated_tags_str = ", ".join(tags_list)
+
+        put_url = f"{self.shop_url}/admin/api/2024-01/products/{product_id}.json"
+        payload = {
+            "product": {
+                "id": product_id,
+                "body_html": seo_data.get("body_html"),
+                "metafields_global_title_tag": seo_data.get("seo_title"),
+                "metafields_global_description_tag": seo_data.get("seo_description"),
+                "tags": updated_tags_str
+            }
+        }
+        
+        response = requests.put(put_url, json=payload, headers=self.headers)
+        
+        if response.status_code == 200:
+            print(f"[SUCCESSO] Prodotto ID {product_id} ottimizzato con HTML e Meta Tag SEO!")
+            return True
+        else:
+            print(f"[ERRORE] Impossibile aggiornare il prodotto {product_id}: {response.text}")
+            return False
