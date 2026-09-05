@@ -109,15 +109,22 @@ class ShopifyCoffeeAgent:
 
 Scrivi descrizioni per un e-commerce professionale. La voce del brand è competente, concreta, affidabile e rassicurante. Il tono è professionale ma naturale, diretto e comprensibile. Usa frasi brevi, verbi attivi e informazioni utili per aiutare il cliente nella scelta.
 
-Metti in evidenza, solo quando sono presenti nella descrizione originale o nel nome del prodotto:
+Metti in evidenza:
 - comfort e libertà di movimento;
-- vestibilità;
+- vestibilità, vestibilità e comfort;
 - tessuti e composizione;
 - resistenza ai lavaggi;
 - facilità di manutenzione;
-- tasche, chiusure, elasticità e dettagli funzionali;
+- tasche, chiusure, elasticità e dettagli funzionali se presenti nel prodotto originale;
 - utilizzo professionale consigliato;
-- possibilità di personalizzazione.
+- possibilità di personalizzazione tranne che per i pantaloni e le scarpe.
+- made in Italy dal 2007 se presente nell'originale
+- il problema o bisogno risolto dal prodotto;
+- i principali vantaggi rispetto a prodotti generici;
+- taglie, colori e modalità di utilizzo;
+- contesti professionali adatti;
+- informazioni utili per favorire la decisione d’acquisto;
+- una call to action finale chiara e naturale.
 
 REGOLA FONDAMENTALE:
 Non inventare mai caratteristiche, materiali, certificazioni, proprietà tecniche, vestibilità, colori, misure o prestazioni non presenti nelle informazioni fornite.
