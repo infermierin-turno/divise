@@ -8,7 +8,7 @@ from tuofile import ShopifyCoffeeAgent  # Sostituisci 'tuofile' con il nome real
 load_dotenv()
 
 # Configura le credenziali del tuo store
-SHOP_URL = os.getenv("SHOPIFY_SHOP_URL", "https://iltuosito.myshopify.com")
+SHOP_URL = os.getenvshop_url = os.getenv("SHOP_URL") or "https://1a6ed6.myshopify.com"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "la-tua-openai-api-key")
 CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET")
