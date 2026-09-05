@@ -17,14 +17,13 @@ class ShopifyCoffeeAgent:
             "Content-Type": "application/json"
         }
         
-        if self.access_token and self.access_token.startswith("shpat_"):
+        # Forziamo l'utilizzo dell'header nativo di Shopify per qualsiasi token fornito (incluso atkn_)
+        if self.access_token:
             self.headers["X-Shopify-Access-Token"] = self.access_token
         elif self.client_id and self.client_secret:
             auth_string = f"{self.client_id}:{self.client_secret}"
             encoded_auth = base64.b64encode(auth_string.encode()).decode()
             self.headers["Authorization"] = f"Basic {encoded_auth}"
-        elif self.access_token:
-            self.headers["X-Shopify-Access-Token"] = self.access_token
 
     def get_products(self, limit=20):
         """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
