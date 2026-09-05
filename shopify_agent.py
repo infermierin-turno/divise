@@ -104,7 +104,7 @@ class ShopifyCoffeeAgent:
         return pending
 
     def optimize_divise_content(self, title, current_body):
-        """Usa l'IA con le nuove regole di rigore e formato JSON nativo per generare i contenuti ottimizzati."""
+        """Usa l'IA con le regole di rigore, temperatura 0.5 e formato JSON nativo."""
         system_prompt = """Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
 
 Scrivi descrizioni per un e-commerce professionale. La voce del brand è competente, concreta, affidabile e rassicurante. Il tono è professionale ma naturale, diretto e comprensibile. Usa frasi brevi, verbi attivi e informazioni utili per aiutare il cliente nella scelta.
@@ -117,8 +117,7 @@ Metti in evidenza, solo quando sono presenti nella descrizione originale o nel n
 - facilità di manutenzione;
 - tasche, chiusure, elasticità e dettagli funzionali;
 - utilizzo professionale consigliato;
-- possibilità di personalizzazione;
-- spedizone gratis per ordini superiori a €79.
+- possibilità di personalizzazione.
 
 REGOLA FONDAMENTALE:
 Non inventare mai caratteristiche, materiali, certificazioni, proprietà tecniche, vestibilità, colori, misure o prestazioni non presenti nelle informazioni fornite.
@@ -194,9 +193,10 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
             return None
 
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
-        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e aggiunge il tag tramite GraphQL."""
+        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag tramite GraphQL con log di debug."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
+        # 1. Recuperiamo i tag attuali
         get_query = f"""
         {{
           product(id: "gid://shopify/Product/{product_id}") {{
@@ -214,6 +214,7 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
         if tag_to_add not in tags_list:
             tags_list.append(tag_to_add)
 
+        # 2. Mutazione GraphQL
         mutation = """
         mutation productUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
@@ -248,14 +249,17 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
         
         response = requests.post(graphql_url, json={"query": mutation, "variables": variables}, headers=self.headers)
         
+        print(f"[DEBUG UPDATE] Status Code HTTP: {response.status_code}")
+        print(f"[DEBUG UPDATE] Response Body: {response.text}")
+        
         if response.status_code == 200:
             result_data = response.json()
             user_errors = result_data.get("data", {}).get("productUpdate", {}).get("userErrors", [])
             if user_errors:
-                print(f"[ERRORE GRAPHQL] {user_errors}")
+                print(f"[ERRORE GRAPHQL RESTITUITO DA SHOPIFY] {user_errors}")
                 return False
-            print(f"[SUCCESSO] Prodotto ID {product_id} aggiornato e taggato via GraphQL!")
+            print(f"[SUCCESSO] Prodotto ID {product_id} aggiornato correttamente via GraphQL!")
             return True
         else:
-            print(f"[ERRORE HTTP] Impossibile aggiornare il prodotto {product_id}: {response.text}")
+            print(f"[ERRORE HTTP] {response.text}")
             return False
