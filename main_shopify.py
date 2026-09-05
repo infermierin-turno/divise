@@ -1,133 +1,71 @@
 import os
-import json
-import base64
-import requests
-from openai import OpenAI
+from fastapi import FastAPI, HTTPException
+from shopify_agent import ShopifyCoffeeAgent
 
-class ShopifyCoffeeAgent:
-    def __init__(self, shop_url, openai_api_key, client_id=None, client_secret=None, access_token=None, **kwargs):
-        self.shop_url = shop_url.rstrip('/')
-        self.ai_client = OpenAI(api_key=openai_api_key)
-        self.client_id = client_id or os.getenv("SHOPIFY_CLIENT_ID") or os.getenv("SHOPIFY_API_KEY")
-        self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
-        
-        self.headers = {
-            "Content-Type": "application/json"
+app = FastAPI(title="Shopify Divise SEO & AI Agent")
+
+# Inizializzazione dell'agente con le variabili d'ambiente di Render
+shop_url = os.getenv("SHOPIFY_SHOP_URL", "https://divisedivise.it")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+access_token = os.getenv("SHOPIFY_ACCESS_TOKEN")
+
+agent = ShopifyCoffeeAgent(
+    shop_url=shop_url,
+    openai_api_key=openai_api_key,
+    access_token=access_token
+)
+
+@app.get("/")
+def read_root():
+    """Verifica lo stato del servizio e testa il recupero dei prodotti da Shopify."""
+    try:
+        products = agent.get_products(limit=5)
+        return {
+            "status": "online",
+            "shop": shop_url,
+            "connection_test": "success" if products is not None else "failed",
+            "products_count_retrieved": len(products) if products else 0,
+            "products_preview": [{"id": p.get("id"), "title": p.get("title")} for p in products] if products else []
         }
-        
-        # Gestione dei token con prefisso atkn_ o shpat_
-        if self.access_token:
-            if self.access_token.startswith("atkn_"):
-                # Se è un token di tipo atkn_, verifichiamo se va passato come Bearer o come X-Shopify-Access-Token.
-                # Di solito i token personalizzati funzionano come Bearer o con header dedicati. 
-                # Proviamo a passarli come Bearer o X-Shopify-Access-Token a seconda del gateway.
-                self.headers["Authorization"] = f"Bearer {self.access_token}"
-                # In alternativa, se Shopify non lo riconosce, prova a metterlo come X-Shopify-Access-Token
-                # self.headers["X-Shopify-Access-Token"] = self.access_token
-            elif self.access_token.startswith("shpat_"):
-                self.headers["X-Shopify-Access-Token"] = self.access_token
-            else:
-                self.headers["X-Shopify-Access-Token"] = self.access_token
-        elif self.client_id and self.client_secret:
-            auth_string = f"{self.client_id}:{self.client_secret}"
-            encoded_auth = base64.b64encode(auth_string.encode()).decode()
-            self.headers["Authorization"] = f"Basic {encoded_auth}"
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
-    def get_products(self, limit=20):
-        """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
-        url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
-        response = requests.get(url, headers=self.headers)
+@app.post("/optimize-products")
+def optimize_products(limit: int = 10):
+    """Avvia il processo di ottimizzazione IA (SEO + HTML) per i prodotti di Shopify."""
+    products = agent.get_products(limit=limit)
+    if not products:
+        raise HTTPException(status_code=404, detail="Nessun prodotto trovato o errore di connessione con Shopify.")
+    
+    results = []
+    for p in products:
+        prod_id = p.get("id")
+        title = p.get("title")
+        body = p.get("body_html") or ""
         
-        print(f"[DEBUG SHOPIFY] Status Code Risposta: {response.status_code}")
-        print(f"[DEBUG SHOPIFY] Contenuto Risposta: {response.text[:300]}")
-        
-        if response.status_code == 200:
-            return response.json().get("products", [])
+        # Generazione dei contenuti ottimizzati tramite IA
+        seo_data = agent.optimize_divise_content(title, body)
+        if seo_data:
+            success = agent.update_product_seo_and_description(prod_id, seo_data)
+            results.append({
+                "product_id": prod_id,
+                "title": title,
+                "success": success,
+                "seo_title_generated": seo_data.get("seo_title")
+            })
         else:
-            print(f"[ERRORE] Impossibile recuperare i prodotti: {response.status_code} - {response.text}")
-            return []
-
-    def optimize_divise_content(self, title, current_body):
-        """Usa l'IA per generare HTML del corpo, Meta Title e Meta Description ottimizzati SEO per le divise."""
-        system_prompt = """
-Sei un assistente specializzato ed esperto di abbigliamento professionale e divise per sanità, estetica, sala, cucina e hospitality. 
-La tua voce è professionale, concreta e rassicurante. Parla come una persona esperta del settore, non come un testo promozionale. 
-Il tono è cortese ma diretto, con frasi brevi e utili. Focalizzati su comfort, vestibilità, resistenza ai lavaggi, tessuti, sicurezza, praticità e personalizzazione (valori del made in Italy dal 2007). 
-Elimina qualsiasi superlativo inutile, aggettivi in fila o frasi 'da vetrina'.
-
-REGOLE TASSATIVE PER L'OUTPUT:
-Devi restituire esclusivamente un oggetto JSON valido (senza blocchi di markdown ```json o altro, solo il testo grezzo JSON) con questa struttura esatta:
-{
-  "seo_title": "Stringa di massimo 55-60 caratteri, ottimizzata per Google e per il click",
-  "seo_description": "Stringa tra i 140 e i 155 caratteri, persuasiva e ricca di valore per i clienti",
-  "body_html": "Il codice HTML puro (strutturato con <h2>, <p>, <ul>, <li>, <strong>) con la descrizione dettagliata"
-}
-
-Non aggiungere alcun testo prima o dopo il JSON.
-"""
-
-        user_prompt = f"""
-Ottimizza il seguente prodotto per il nostro e-commerce di divise professionali.
-        
-Nome Prodotto: {title}
-Descrizione Attuale: {current_body}
-"""
-
-        try:
-            response = self.ai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7
-            )
-            raw_content = response.choices[0].message.content.strip()
+            results.append({
+                "product_id": prod_id,
+                "title": title,
+                "success": False,
+                "error": "Generazione IA fallita o formato non valido"
+            })
             
-            if raw_content.startswith("```"):
-                raw_content = raw_content.split("```")[1]
-                if raw_content.startswith("json"):
-                    raw_content = raw_content[4:].strip()
-                raw_content = raw_content.rstrip("`").strip()
-
-            data = json.loads(raw_content)
-            return data
-        except Exception as e:
-            print(f"Errore durante la generazione o il parsing JSON dall'IA: {e}")
-            return None
-
-    def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
-        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag."""
-        get_url = f"{self.shop_url}/admin/api/2024-01/products/{product_id}.json"
-        get_resp = requests.get(get_url, headers=self.headers)
-        
-        current_tags_str = ""
-        if get_resp.status_code == 200:
-            product_data = get_resp.json().get("product", {})
-            current_tags_str = product_data.get("tags", "")
-
-        tags_list = [t.strip() for t in current_tags_str.split(",")] if current_tags_str else []
-        if tag_to_add not in tags_list:
-            tags_list.append(tag_to_add)
-        
-        updated_tags_str = ", ".join(tags_list)
-
-        put_url = f"{self.shop_url}/admin/api/2024-01/products/{product_id}.json"
-        payload = {
-            "product": {
-                "id": product_id,
-                "body_html": seo_data.get("body_html"),
-                "metafields_global_title_tag": seo_data.get("seo_title"),
-                "metafields_global_description_tag": seo_data.get("seo_description"),
-                "tags": updated_tags_str
-            }
-        }
-        
-        response = requests.put(put_url, json=payload, headers=self.headers)
-        
-        if response.status_code == 200:
-            print(f"[SUCCESSO] Prodotto ID {product_id} ottimizzato con HTML e Meta Tag SEO!")
-            return True
-        else:
-            print(f"[ERRORE] Impossibile aggiornare il prodotto {product_id}: {response.text}")
-            return False
+    return {
+        "status": "completed",
+        "processed_products": len(results),
+        "details": results
+    }
