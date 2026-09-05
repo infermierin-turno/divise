@@ -46,22 +46,49 @@ class ShopifyCoffeeAgent:
             return None
 
     def get_products(self, limit=50):
-        """Verifica l'account connesso e recupera l'elenco completo dei prodotti senza filtri di pubblicazione."""
-        shop_info_url = f"{self.shop_url}/admin/api/2024-07/shop.json"
-        shop_resp = requests.get(shop_info_url, headers=self.headers)
-        print(f"[DEBUG SHOP INFO] Risposta Shop: {shop_resp.status_code} - {shop_resp.text}")
-
-        # Aggiunto published_status=any per includere bozze e prodotti non pubblicati su canali specifici
-        url = f"{self.shop_url}/admin/api/2024-07/products.json?limit={limit}&status=any&published_status=any"
-        response = requests.get(url, headers=self.headers)
+        """Recupera l'elenco dei prodotti tramite Shopify GraphQL Admin API."""
+        graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
-        print(f"[DEBUG SHOPIFY] Status Code Risposta Prodotti: {response.status_code}")
-        print(f"[DEBUG SHOPIFY] Contenuto Risposta Completo: {response.text}")
+        query = f"""
+        {{
+          products(first: {limit}) {{
+            edges {{
+              node {{
+                id
+                title
+                handle
+                descriptionHtml
+                tags
+              }}
+            }}
+          }}
+        }}
+        """
+        
+        response = requests.post(graphql_url, json={"query": query}, headers=self.headers)
+        
+        print(f"[DEBUG GRAPHQL] Status Code: {response.status_code}")
+        print(f"[DEBUG GRAPHQL] Risposta: {response.text}")
         
         if response.status_code == 200:
-            return response.json().get("products", [])
+            data = response.json()
+            edges = data.get("data", {}).get("products", {}).get("edges", [])
+            # Convertiamo il formato GraphQL in una struttura pulita simile alla REST API
+            products = []
+            for edge in edges:
+                node = edge.get("node", {})
+                # Pulisciamo l'ID GraphQL (es. gid://shopify/Product/123 -> 123)
+                raw_id = node.get("id", "")
+                numeric_id = raw_id.split("/")[-1] if raw_id else ""
+                products.append({
+                    "id": numeric_id,
+                    "title": node.get("title"),
+                    "body_html": node.get("descriptionHtml"),
+                    "tags": ", ".join(node.get("tags", []))
+                })
+            return products
         else:
-            print(f"[ERRORE] Impossibile recuperare i prodotti: {response.status_code} - {response.text}")
+            print(f"[ERRORE] Impossibile recuperare i prodotti via GraphQL: {response.text}")
             return []
 
     def optimize_divise_content(self, title, current_body):
