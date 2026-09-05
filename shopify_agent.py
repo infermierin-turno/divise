@@ -173,9 +173,10 @@ La descrizione HTML deve essere ordinata e legibile e può contenere:
 - un'introduzione con <p>;
 - titoli <h2> descrittivi;
 - elenchi puntati con <ul> e <li>;
-- parole importanti in <strong>.
+- parole importanti in <strong>;
+- tag HTML <a> esclusivamente per inserire il link alla guida alle taglie ufficiale dello store (es. <a href="/pages/guida-alle-taglie">guida alle taglie</a>) laddove pertinente per aiutare il cliente nella scelta.
 
-Non utilizzare <h1>. Non inserire markdown, link, emoji, shortcode o codice JavaScript nel corpo HTML.
+Non utilizzare <h1>. Non inserire markdown, emoji, shortcode o codice JavaScript nel corpo HTML.
 
 REGOLE SEO:
 - seo_title: massimo 60 caratteri, chiaro e descrittivo;
