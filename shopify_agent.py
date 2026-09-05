@@ -46,7 +46,7 @@ class ShopifyCoffeeAgent:
             return None
 
     def get_products(self, limit=50):
-        """Recupera l'elenco dei prodotti tramite Shopify GraphQL Admin API."""
+        """Recupera l'elenco dei prodotti con relative varianti tramite Shopify GraphQL Admin API."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
         query = f"""
@@ -59,6 +59,20 @@ class ShopifyCoffeeAgent:
                 handle
                 descriptionHtml
                 tags
+                variants(first: 20) {{
+                  edges {{
+                    node {{
+                      id
+                      title
+                      price
+                      sku
+                      selectedOptions {{
+                        name
+                        value
+                      }}
+                    }}
+                  }}
+                }}
               }}
             }}
           }}
@@ -75,11 +89,25 @@ class ShopifyCoffeeAgent:
                 node = edge.get("node", {})
                 raw_id = node.get("id", "")
                 numeric_id = raw_id.split("/")[-1] if raw_id else ""
+                
+                # Estrazione pulita delle varianti
+                variants_list = []
+                for v_edge in node.get("variants", {}).get("edges", []):
+                    v_node = v_edge.get("node", {})
+                    variants_list.append({
+                        "id": v_node.get("id"),
+                        "title": v_node.get("title"),
+                        "price": v_node.get("price"),
+                        "sku": v_node.get("sku"),
+                        "options": v_node.get("selectedOptions", [])
+                    })
+
                 products.append({
                     "id": numeric_id,
                     "title": node.get("title"),
                     "body_html": node.get("descriptionHtml"),
-                    "tags": node.get("tags", [])
+                    "tags": node.get("tags", []),
+                    "variants": variants_list
                 })
             return products
         else:
@@ -103,28 +131,25 @@ class ShopifyCoffeeAgent:
                     break
         return pending
 
-    def optimize_divise_content(self, title, current_body):
-        """Usa l'IA con le regole di rigore, generando lo Schema FAQ esattamente nel formato richiesto."""
+    def optimize_divise_content(self, product_data):
+        """Usa l'IA integrando dati del prodotto e delle varianti per generare contenuti e FAQ Schema dettagliate."""
+        title = product_data.get("title")
+        current_body = product_data.get("body_html")
+        variants = product_data.get("variants", [])
+
         system_prompt = """Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
 
 Scrivi descrizioni per un e-commerce professionale. La voce del brand è competente, concreta, affidabile e rassicurante. Il tono è professionale ma naturale, diretto e comprensibile. Usa frasi brevi, verbi attivi e informazioni utili per aiutare il cliente nella scelta.
 
-Metti in evidenza:
+Metti in evidenza, solo quando sono presenti nella descrizione originale o nelle varianti del prodotto:
 - comfort e libertà di movimento;
-- vestibilità, vestibilità e comfort;
+- vestibilità;
 - tessuti e composizione;
 - resistenza ai lavaggi;
 - facilità di manutenzione;
-- tasche, chiusure, elasticità e dettagli funzionali se presenti nel prodotto originale;
+- tasche, chiusure, elasticità e dettagli funzionali;
 - utilizzo professionale consigliato;
-- possibilità di personalizzazione tranne che per i pantaloni e le scarpe.
-- made in Italy dal 2007 se presente nell'originale
-- il problema o bisogno risolto dal prodotto;
-- i principali vantaggi rispetto a prodotti generici;
-- taglie, colori e modalità di utilizzo;
-- contesti professionali adatti;
-- informazioni utili per favorire la decisione d’acquisto;
-- una call to action finale chiara e naturale.
+- possibilità di personalizzazione.
 
 REGOLA FONDAMENTALE:
 Non inventare mai caratteristiche, materiali, certificazioni, proprietà tecniche, vestibilità, colori, misure o prestazioni non presenti nelle informazioni fornite.
@@ -147,7 +172,8 @@ REGOLE SEO:
 - non inserire parole chiave in modo artificiale.
 
 REGOLE PER IL FAQ SCHEMA:
-Genera un array JSON con 3 o 4 domande e risposte utili per il cliente (es. su tessuti, lavaggio, utilizzo o personalizzazione), strutturate esattamente in questo formato:
+Sfrutta le varianti reali fornite (colori, taglie, prezzi, SKU) per creare domande e risposte mirate e veritiere (es. varianti di colore disponibili, prezzi o taglie).
+Genera un array JSON con domande e risposte utili strutturate esattamente in questo formato:
 [
   {
     "@type": "Question",
@@ -158,7 +184,7 @@ Genera un array JSON con 3 o 4 domande e risposte utili per il cliente (es. su t
     }
   }
 ]
-Bassati unicamente sulle informazioni certe del prodotto.
+Basati unicamente sulle informazioni certe del prodotto e delle sue varianti.
 
 REGOLE TASSATIVE PER L'OUTPUT:
 Devi restituire esclusivamente un oggetto JSON valido con questa struttura esatta:
@@ -187,7 +213,10 @@ Nome prodotto:
 Descrizione attuale:
 {current_body or "Nessuna descrizione disponibile"}
 
-Usa le informazioni disponibili nella descrizione attuale come fonte principale.
+Varianti disponibili (colori, taglie, prezzi, SKU):
+{json.dumps(variants, ensure_ascii=False, indent=2)}
+
+Usa le informazioni disponibili nella descrizione e nelle varianti come fonte principale.
 Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o frasi generiche.
 """
 
@@ -208,24 +237,98 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
             print(f"Errore durante la generazione o il parsing JSON dall'IA: {e}")
             return None
 
-    def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
-        """Aggiorna su Shopify descrizione, SEO, tag e salva il FAQ Schema nel Metafield dedicato."""
+    def update_product_image_alt_texts(self, product_id, product_title):
+        """Recupera le immagini del prodotto e aggiorna automaticamente il loro Alt Text per la SEO."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
-        # 1. Recuperiamo i tag attuali
+        # 1. Recupera le immagini collegate al prodotto
+        query_images = f"""
+        {{
+          product(id: "gid://shopify/Product/{product_id}") {{
+            images(first: 10) {{
+              edges {{
+                node {{
+                  id
+                  url
+                }}
+              }}
+            }}
+          }}
+        }}
+        """
+        resp = requests.post(graphql_url, json={"query": query_images}, headers=self.headers)
+        if resp.status_code != 200:
+            print(f"[ERRORE] Impossibile recuperare le immagini per il prodotto {product_id}")
+            return False
+            
+        edges = resp.json().get("data", {}).get("product", {}).get("images", {}).get("edges", [])
+        if not edges:
+            return True
+
+        # 2. Mutazione per aggiornare l'altText di ogni immagine
+        mutation_alt = """
+        mutation productUpdateMedia($media: [CreateMediaInput!]!, $productId: ID!) {
+          productUpdateMedia(media: $media, productId: $productId) {
+            media {
+              id
+              alt
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+        """
+        
+        media_inputs = []
+        for i, edge in enumerate(edges):
+            img_id = edge.get("node", {}).get("id")
+            # Crea un Alt text pulito, professionale e descrittivo per Google Immagini
+            alt_text = f"{product_title} - Vista {i+1} abbigliamento professionale"
+            media_inputs.append({
+                "id": img_id,
+                "alt": alt_text,
+                "mediaContentType": "IMAGE"
+            })
+
+        variables = {
+            "productId": f"gid://shopify/Product/{product_id}",
+            "media": media_inputs
+        }
+
+        alt_resp = requests.post(graphql_url, json={"query": mutation_alt, "variables": variables}, headers=self.headers)
+        if alt_resp.status_code == 200:
+            res_data = alt_resp.json()
+            errors = res_data.get("data", {}).get("productUpdateMedia", {}).get("userErrors", [])
+            if errors:
+                print(f"[AVVISO ALT TEXT] {errors}")
+            else:
+                print(f"[SUCCESSO] Alt Text aggiornati per le immagini del prodotto {product_id}!")
+        return True
+
+    def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
+        """Aggiorna su Shopify descrizione, SEO, tag, Metafield FAQ Schema e Alt Text delle immagini."""
+        graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
+        
+        # 1. Recuperiamo i tag attuali e il titolo del prodotto (utile per gli alt text)
         get_query = f"""
         {{
           product(id: "gid://shopify/Product/{product_id}") {{
+            title
             tags
           }}
         }}
         """
         resp = requests.post(graphql_url, json={"query": get_query}, headers=self.headers)
         tags_list = []
+        product_title = "Prodotto Professionale"
         if resp.status_code == 200:
             node = resp.json().get("data", {}).get("product", {})
-            if node and node.get("tags"):
-                tags_list = node.get("tags")
+            if node:
+                product_title = node.get("title", product_title)
+                if node.get("tags"):
+                    tags_list = node.get("tags")
         
         if tag_to_add not in tags_list:
             tags_list.append(tag_to_add)
@@ -314,6 +417,9 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
                         print(f"[SUCCESSO] Metafield FAQ Schema salvato correttamente per il prodotto {product_id}!")
                 else:
                     print(f"[ERRORE HTTP METAFIELD] {meta_resp.text}")
+
+            # 4. Ottimizzazione automatica Alt Text delle immagini collegate
+            self.update_product_image_alt_texts(product_id, product_title)
 
             print(f"[SUCCESSO] Prodotto ID {product_id} aggiornato completamente via GraphQL!")
             return True
