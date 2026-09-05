@@ -45,9 +45,9 @@ class ShopifyCoffeeAgent:
             print(f"Errore durante la richiesta del token Shopify: {e}")
             return None
 
-    def get_products(self, limit=20):
-        """Recupera l'elenco dei prodotti tramite l'endpoint standard Admin API."""
-        url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
+    def get_products(self, limit=50):
+        """Recupera l'elenco completo di tutti i prodotti senza filtri restrittivi."""
+        url = f"{self.shop_url}/admin/api/2024-07/products.json?limit={limit}&status=any"
         response = requests.get(url, headers=self.headers)
         
         print(f"[DEBUG SHOPIFY] Status Code Risposta Prodotti: {response.status_code}")
@@ -110,7 +110,7 @@ Descrizione Attuale: {current_body}
 
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
         """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag."""
-        get_url = f"{self.shop_url}/admin/api/2024-01/products/{product_id}.json"
+        get_url = f"{self.shop_url}/admin/api/2024-07/products/{product_id}.json"
         get_resp = requests.get(get_url, headers=self.headers)
         
         current_tags_str = ""
@@ -124,7 +124,7 @@ Descrizione Attuale: {current_body}
         
         updated_tags_str = ", ".join(tags_list)
 
-        put_url = f"{self.shop_url}/admin/api/2024-01/products/{product_id}.json"
+        put_url = f"{self.shop_url}/admin/api/2024-07/products/{product_id}.json"
         payload = {
             "product": {
                 "id": product_id,
