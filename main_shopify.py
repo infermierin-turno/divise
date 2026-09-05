@@ -63,98 +63,114 @@ def generate_complete_faq(product_title, variants, body_html=""):
     ]
     return faq_list
 
-def requests_post_safe(url, query, headers):
+def requests_post_safe(url, query, headers, variables=None):
     try:
-        return requests.post(url, json={"query": query}, headers=headers)
+        payload = {"query": query}
+        if variables:
+            payload["variables"] = variables
+        return requests.post(url, json=payload, headers=headers)
     except Exception as e:
         print(f"Errore di rete: {e}")
         return None
 
 def bulk_add_missing_faqs():
     graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
-    
-    query = """
-    {
-      products(first: 250) {
-        edges {
-          node {
-            id
-            title
-            descriptionHtml
-            variants(first: 20) {
-              edges {
-                node {
-                  title
+    updated_count = 0
+    has_next_page = True
+    end_cursor = None
+
+    while has_next_page:
+        query = """
+        query getProducts($cursor: String) {
+          products(first: 250, after: $cursor) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              node {
+                id
+                title
+                descriptionHtml
+                variants(first: 20) {
+                  edges {
+                    node {
+                      title
+                    }
+                  }
+                }
+                metafield(namespace: "custom", key: "faq_schema") {
+                  id
                 }
               }
-            }
-            metafield(namespace: "custom", key: "faq_schema") {
-              id
-            }
-          }
-        }
-      }
-    }
-    """
-
-    response = requests_post_safe(graphql_url, query, agent.headers)
-    if not response or response.status_code != 200:
-        raise Exception("Impossibile recuperare l'elenco dei prodotti da Shopify.")
-
-    edges = response.json().get("data", {}).get("products", {}).get("edges", [])
-    updated_count = 0
-
-    for edge in edges:
-        node = edge.get("node", {})
-        raw_id = node.get("id", "")
-        product_id = raw_id.split("/")[-1] if raw_id else ""
-        title = node.get("title", "Prodotto")
-        body_html = node.get("descriptionHtml", "")
-        has_faq_metafield = node.get("metafield") is not None
-
-        if has_faq_metafield:
-            continue
-
-        variants_list = []
-        for v_edge in node.get("variants", {}).get("edges", []):
-            variants_list.append(v_edge.get("node", {}))
-
-        faq_obj = generate_complete_faq(title, variants_list, body_html)
-
-        metafield_mutation = """
-        mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-          metafieldsSet(metafields: $metafields) {
-            metafields {
-              id
-              namespace
-              key
-              value
-            }
-            userErrors {
-              field
-              message
             }
           }
         }
         """
-        metafield_variables = {
-            "metafields": [
-                {
-                    "ownerId": f"gid://shopify/Product/{product_id}",
-                    "namespace": "custom",
-                    "key": "faq_schema",
-                    "type": "json",
-                    "value": json.dumps(faq_obj, ensure_ascii=False)
-                }
-            ]
-        }
+        variables = {"cursor": end_cursor}
+        response = requests_post_safe(graphql_url, query, agent.headers, variables=variables)
+        
+        if not response or response.status_code != 200:
+            raise Exception("Impossibile recuperare l'elenco dei prodotti da Shopify.")
 
-        meta_resp = requests.post(graphql_url, json={"query": metafield_mutation, "variables": metafield_variables}, headers=agent.headers)
-        if meta_resp.status_code == 200:
-            meta_data = meta_resp.json()
-            meta_errors = meta_data.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
-            if not meta_errors:
-                updated_count += 1
+        data = response.json().get("data", {}).get("products", {})
+        page_info = data.get("pageInfo", {})
+        has_next_page = page_info.get("hasNextPage", False)
+        end_cursor = page_info.get("endCursor")
+
+        edges = data.get("edges", [])
+
+        for edge in edges:
+            node = edge.get("node", {})
+            raw_id = node.get("id", "")
+            product_id = raw_id.split("/")[-1] if raw_id else ""
+            title = node.get("title", "Prodotto")
+            body_html = node.get("descriptionHtml", "")
+            has_faq_metafield = node.get("metafield") is not None
+
+            if has_faq_metafield:
+                continue
+
+            variants_list = []
+            for v_edge in node.get("variants", {}).get("edges", []):
+                variants_list.append(v_edge.get("node", {}))
+
+            faq_obj = generate_complete_faq(title, variants_list, body_html)
+
+            metafield_mutation = """
+            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) {
+                metafields {
+                  id
+                  namespace
+                  key
+                  value
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+            """
+            metafield_variables = {
+                "metafields": [
+                    {
+                        "ownerId": f"gid://shopify/Product/{product_id}",
+                        "namespace": "custom",
+                        "key": "faq_schema",
+                        "type": "json",
+                        "value": json.dumps(faq_obj, ensure_ascii=False)
+                    }
+                ]
+            }
+
+            meta_resp = requests.post(graphql_url, json={"query": metafield_mutation, "variables": metafield_variables}, headers=agent.headers)
+            if meta_resp.status_code == 200:
+                meta_data = meta_resp.json()
+                meta_errors = meta_data.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
+                if not meta_errors:
+                    updated_count += 1
 
     return updated_count
 
@@ -167,7 +183,7 @@ def trigger_bulk_faqs(key: str = ""):
 
     try:
         count = bulk_add_missing_faqs()
-        return {"status": "success", "message": f"Aggiornamento massivo completato. Aggiunti FAQ Schema a {count} prodotti."}
+        return {"status": "success", "message": f"Aggiornamento massivo completato. Aggiunti FAQ Schema a {count} prodotti in tutto il catalogo."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -211,10 +227,10 @@ def read_root():
 
                 <!-- SEZIONE 2: AGGIORNAMENTO MASSIVO FAQ -->
                 <div class="mb-8 p-5 bg-purple-50/50 rounded-xl border border-purple-100">
-                    <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ Schema</h3>
-                    <p class="text-xs text-gray-500 mb-3">Aggiunge automaticamente le FAQ strutturate a tutti i prodotti che ne sono sprovvisti.</p>
+                    <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ Schema (Completo)</h3>
+                    <p class="text-xs text-gray-500 mb-3">Scansiona tutto il catalogo e aggiunge le FAQ strutturate a tutti i prodotti rimanenti.</p>
                     <a href="/run-bulk-faqs?key=unasegretafacile" target="_blank" class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition shadow">
-                        Esegui Aggiornamento Massivo FAQ &rarr;
+                        Esegui Aggiornamento Massivo Totale &rarr;
                     </a>
                 </div>
 
