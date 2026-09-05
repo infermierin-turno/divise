@@ -173,7 +173,7 @@ def trigger_bulk_faqs(key: str = ""):
 
 @app.get("/", response_class=HTMLResponse)
 def read_root():
-    """Dashboard principale con entrambe le opzioni: prodotti in sospeso e ricerca per ID."""
+    """Dashboard principale."""
     html_content = f"""
     <!DOCTYPE html>
     <html lang="it">
@@ -199,7 +199,7 @@ def read_root():
                 <!-- SEZIONE 1: RICERCA PUNTUALE PER ID -->
                 <div class="mb-8 p-5 bg-blue-50/50 rounded-xl border border-blue-100">
                     <h3 class="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">1. Cerca e aggiorna un prodotto specifico</h3>
-                    <p class="text-xs text-gray-500 mb-3">Inserisci l'ID numerico del prodotto (es. 9323963253068) per forzare l'ottimizzazione anche se è già stato taggato.</p>
+                    <p class="text-xs text-gray-500 mb-3">Inserisci l'ID numerico del prodotto per forzare l'ottimizzazione.</p>
                     <form action="/preview-custom" method="get" class="flex gap-3">
                         <input type="text" name="product_id" placeholder="ID Prodotto Shopify" required
                             class="flex-1 px-4 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -209,9 +209,18 @@ def read_root():
                     </form>
                 </div>
 
-                <!-- SEZIONE 2: PRODOTTI IN SOSPESO (SENZA TAG) -->
+                <!-- SEZIONE 2: AGGIORNAMENTO MASSIVO FAQ -->
+                <div class="mb-8 p-5 bg-purple-50/50 rounded-xl border border-purple-100">
+                    <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ Schema</h3>
+                    <p class="text-xs text-gray-500 mb-3">Aggiunge automaticamente le FAQ strutturate a tutti i prodotti che ne sono sprovvisti.</p>
+                    <a href="/run-bulk-faqs?key=unasegretafacile" target="_blank" class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition shadow">
+                        Esegui Aggiornamento Massivo FAQ &rarr;
+                    </a>
+                </div>
+
+                <!-- SEZIONE 3: PRODOTTI IN SOSPESO -->
                 <div class="p-5 bg-gray-50 rounded-xl border border-gray-200">
-                    <h3 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2">2. Procedi in automatico</h3>
+                    <h3 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2">3. Prodotti in sospeso</h3>
                     <p class="text-xs text-gray-500 mb-4">Visualizza l'elenco dei prodotti che non possiedono ancora il tag "Ottimizzato IA".</p>
                     <a href="/pending-products" class="inline-block bg-gray-800 hover:bg-gray-900 text-white font-medium px-5 py-2.5 rounded-lg shadow transition text-sm">
                         Visualizza Prodotti in Sospeso &rarr;
@@ -226,10 +235,8 @@ def read_root():
 
 @app.get("/pending-products", response_class=HTMLResponse)
 def get_pending_products():
-    """Mostra in formato HTML i primi articoli in sospeso senza tag."""
     try:
         pending = agent.get_pending_products(limit=3)
-        
         cards_html = ""
         if not pending:
             cards_html = '<div class="p-6 bg-green-50 text-green-700 rounded-lg text-center font-medium">Ottimo lavoro! Tutti i prodotti sono stati ottimizzati.</div>'
@@ -266,10 +273,7 @@ def get_pending_products():
                     </div>
                     <a href="/" class="text-blue-600 hover:underline text-sm font-medium">&larr; Torna alla Home</a>
                 </header>
-
-                <div class="space-y-4">
-                    {cards_html}
-                </div>
+                <div class="space-y-4">{cards_html}</div>
             </div>
         </body>
         </html>
@@ -280,19 +284,16 @@ def get_pending_products():
 
 @app.get("/preview-custom", response_class=HTMLResponse)
 def preview_custom_product(product_id: str):
-    """Pulisce l'ID inserito e reindirizza alla schermata di anteprima standard."""
     clean_id = product_id.strip().split("/")[-1]
     return preview_product_optimization(clean_id)
 
 @app.get("/preview/{product_id}", response_class=HTMLResponse)
 def preview_product_optimization(product_id: str):
-    """Mostra l'anteprima visiva allargata e leggibile della correzione IA."""
     try:
         url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
         response = requests.get(url, headers=agent.headers)
-        
         if response.status_code != 200:
-            raise HTTPException(status_code=404, detail="Prodotto non trovato su Shopify. Controlla che l'ID sia corretto.")
+            raise HTTPException(status_code=404, detail="Prodotto non trovato su Shopify.")
         
         product_data = response.json().get("product", {})
         title = product_data.get("title", "")
@@ -325,8 +326,6 @@ def preview_product_optimization(product_id: str):
                 </header>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-                    
-                    <!-- COLONNA 1: SITUAZIONE ATTUALE -->
                     <div class="bg-white border rounded-xl p-6 shadow-sm flex flex-col justify-between">
                         <div>
                             <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 pb-2 border-b">Situazione Attuale (Originale)</h3>
@@ -343,16 +342,15 @@ def preview_product_optimization(product_id: str):
                         </div>
                     </div>
 
-                    <!-- COLONNA 2: PROPOSTA IA -->
                     <div class="bg-white border border-green-300 rounded-xl p-6 shadow-md bg-green-50/20 flex flex-col justify-between">
                         <div>
                             <h3 class="text-xs font-bold text-green-700 uppercase tracking-wider mb-4 pb-2 border-b border-green-200">Proposta IA (Ottimizzata)</h3>
                             <div class="mb-3">
-                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Title ({len(seo_title)} caratteri):</span>
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Title:</span>
                                 <p class="text-blue-700 font-semibold text-base bg-blue-50/50 p-2 rounded border border-blue-100">{seo_title}</p>
                             </div>
                             <div class="mb-4">
-                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Description ({len(seo_desc)} caratteri):</span>
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Description:</span>
                                 <p class="text-gray-700 text-sm bg-gray-50/80 p-2.5 rounded border border-gray-200">{seo_desc}</p>
                             </div>
                             <div>
@@ -363,7 +361,6 @@ def preview_product_optimization(product_id: str):
                             </div>
                         </div>
                     </div>
-
                 </div>
 
                 <div class="flex justify-end gap-4 bg-white p-5 rounded-xl border shadow-sm items-center">
@@ -380,11 +377,9 @@ def preview_product_optimization(product_id: str):
 
 @app.get("/apply/{product_id}", response_class=HTMLResponse)
 def apply_product_optimization(product_id: str):
-    """Applica l'ottimizzazione su Shopify per lo specifico ID."""
     try:
         url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
         response = requests.get(url, headers=agent.headers)
-        
         if response.status_code != 200:
             raise HTTPException(status_code=404, detail="Prodotto non trovato su Shopify.")
         
@@ -410,12 +405,10 @@ def apply_product_optimization(product_id: str):
                 <div class="max-w-xl mx-auto p-12 text-center mt-12 bg-white rounded-2xl shadow-md border">
                     <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">&#10003;</div>
                     <h1 class="text-2xl font-bold text-gray-800 mb-2">Aggiornato con Successo!</h1>
-                    <p class="text-gray-600 mb-6">Il prodotto <strong>{title}</strong> è stato aggiornato su Shopify e taggato come <span class="bg-gray-100 font-mono text-xs px-2 py-1 rounded">Ottimizzato IA</span>.</p>
-                    <div class="flex justify-center gap-4">
-                        <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-lg shadow transition">
-                            Torna alla Home &rarr;
-                        </a>
-                    </div>
+                    <p class="text-gray-600 mb-6">Il prodotto <strong>{title}</strong> è stato aggiornato su Shopify.</p>
+                    <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-lg shadow transition">
+                        Torna alla Home &rarr;
+                    </a>
                 </div>
             </body>
             </html>
