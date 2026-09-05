@@ -46,17 +46,15 @@ class ShopifyCoffeeAgent:
             return None
 
     def get_products(self, limit=20):
-        """Recupera l'elenco dei prodotti tramite le Product Listings per i Sales Channel."""
-        url = f"{self.shop_url}/admin/api/2024-01/product_listings.json?limit={limit}"
+        """Recupera l'elenco dei prodotti tramite l'endpoint standard Admin API."""
+        url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
         response = requests.get(url, headers=self.headers)
         
         print(f"[DEBUG SHOPIFY] Status Code Risposta Prodotti: {response.status_code}")
         print(f"[DEBUG SHOPIFY] Contenuto Risposta Completo: {response.text}")
         
         if response.status_code == 200:
-            # Le product_listings restituiscono la chiave "product_listings" anziché "products"
-            listings = response.json().get("product_listings", [])
-            return listings
+            return response.json().get("products", [])
         else:
             print(f"[ERRORE] Impossibile recuperare i prodotti: {response.status_code} - {response.text}")
             return []
