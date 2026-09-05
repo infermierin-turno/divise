@@ -20,7 +20,7 @@ agent = ShopifyCoffeeAgent(
 
 @app.get("/", response_class=HTMLResponse)
 def read_root():
-    """Dashboard principale con interfaccia grafica e pulsanti di navigazione."""
+    """Dashboard principale con entrambe le opzioni: prodotti in sospeso e ricerca per ID."""
     html_content = f"""
     <!DOCTYPE html>
     <html lang="it">
@@ -41,11 +41,27 @@ def read_root():
 
             <div class="bg-white rounded-xl shadow-md p-6 mb-6">
                 <h2 class="text-xl font-semibold mb-4">Pannello di Controllo</h2>
-                <p class="text-gray-600 mb-6">Gestisci l'ottimizzazione SEO automatica dei prodotti del catalogo con un solo clic. I prodotti ottimizzati vengono automaticamente contrassegnati per evitare duplicazioni.</p>
+                <p class="text-gray-600 mb-6">Scegli come procedere con l'ottimizzazione SEO dei prodotti:</p>
                 
-                <div class="flex gap-4">
-                    <a href="/pending-products" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-3 rounded-lg shadow transition text-center flex-1">
-                        Visualizza Prodotti in Sospeso
+                <!-- SEZIONE 1: RICERCA PUNTUALE PER ID -->
+                <div class="mb-8 p-5 bg-blue-50/50 rounded-xl border border-blue-100">
+                    <h3 class="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">1. Cerca e aggiorna un prodotto specifico</h3>
+                    <p class="text-xs text-gray-500 mb-3">Inserisci l'ID numerico del prodotto (es. 9323963253068) per forzare l'ottimizzazione anche se è già stato taggato.</p>
+                    <form action="/preview-custom" method="get" class="flex gap-3">
+                        <input type="text" name="product_id" placeholder="ID Prodotto Shopify" required
+                            class="flex-1 px-4 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2 rounded-lg text-sm transition shadow">
+                            Ottimizza per ID
+                        </button>
+                    </form>
+                </div>
+
+                <!-- SEZIONE 2: PRODOTTI IN SOSPESO (SENZA TAG) -->
+                <div class="p-5 bg-gray-50 rounded-xl border border-gray-200">
+                    <h3 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2">2. Procedi in automatico</h3>
+                    <p class="text-xs text-gray-500 mb-4">Visualizza l'elenco dei prodotti che non possiedono ancora il tag "Ottimizzato IA".</p>
+                    <a href="/pending-products" class="inline-block bg-gray-800 hover:bg-gray-900 text-white font-medium px-5 py-2.5 rounded-lg shadow transition text-sm">
+                        Visualizza Prodotti in Sospeso &rarr;
                     </a>
                 </div>
             </div>
@@ -57,7 +73,7 @@ def read_root():
 
 @app.get("/pending-products", response_class=HTMLResponse)
 def get_pending_products():
-    """Mostra in formato HTML i primi tre articoli in sospeso con pulsanti per l'anteprima."""
+    """Mostra in formato HTML i primi articoli in sospeso senza tag."""
     try:
         pending = agent.get_pending_products(limit=3)
         
@@ -93,7 +109,7 @@ def get_pending_products():
                 <header class="mb-8 border-b pb-4 flex justify-between items-center">
                     <div>
                         <h1 class="text-2xl font-bold text-gray-800">Prodotti in Sospeso</h1>
-                        <p class="text-sm text-gray-500">Primi 3 articoli non ancora ottimizzati</p>
+                        <p class="text-sm text-gray-500">Articoli non ancora ottimizzati</p>
                     </div>
                     <a href="/" class="text-blue-600 hover:underline text-sm font-medium">&larr; Torna alla Home</a>
                 </header>
@@ -109,15 +125,21 @@ def get_pending_products():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/preview-custom", response_class=HTMLResponse)
+def preview_custom_product(product_id: str):
+    """Pulisce l'ID inserito e reindirizza alla schermata di anteprima standard."""
+    clean_id = product_id.strip().split("/")[-1]
+    return preview_product_optimization(clean_id)
+
 @app.get("/preview/{product_id}", response_class=HTMLResponse)
 def preview_product_optimization(product_id: str):
-    """Mostra l'anteprima visiva della correzione IA con pulsanti di approvazione o ritorno."""
+    """Mostra l'anteprima visiva allargata e leggibile della correzione IA."""
     try:
         url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
         response = requests.get(url, headers=agent.headers)
         
         if response.status_code != 200:
-            raise HTTPException(status_code=404, detail="Prodotto non trovato su Shopify.")
+            raise HTTPException(status_code=404, detail="Prodotto non trovato su Shopify. Controlla che l'ID sia corretto.")
         
         product_data = response.json().get("product", {})
         title = product_data.get("title", "")
@@ -140,48 +162,65 @@ def preview_product_optimization(product_id: str):
             <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
         </head>
         <body class="bg-gray-50 text-gray-900 font-sans antialiased">
-            <div class="max-w-4xl mx-auto p-8">
+            <!-- Utilizziamo max-w-6xl per allargare lo spazio visivo -->
+            <div class="max-w-6xl mx-auto p-8">
                 <header class="mb-8 border-b pb-4 flex justify-between items-center">
                     <div>
                         <h1 class="text-2xl font-bold text-gray-800">Anteprima Ottimizzazione</h1>
-                        <p class="text-sm text-gray-500">Prodotto: {title}</p>
+                        <p class="text-sm text-gray-500">Prodotto: <strong class="text-gray-700">{title}</strong> (ID: {product_id})</p>
                     </div>
-                    <a href="/pending-products" class="text-blue-600 hover:underline text-sm font-medium">&larr; Indietro ai prodotti</a>
+                    <a href="/" class="text-blue-600 hover:underline text-sm font-medium">&larr; Torna alla Home</a>
                 </header>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                    <div class="bg-white border rounded-xl p-6 shadow-sm">
-                        <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Situazione Attuale</h3>
-                        <div class="mb-4">
-                            <span class="text-xs font-bold text-gray-500">Titolo:</span>
-                            <p class="text-gray-800 font-medium">{title}</p>
-                        </div>
+                <!-- Griglia a due colonne ben spaziata e più alta -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    
+                    <!-- COLONNA 1: SITUAZIONE ATTUALE -->
+                    <div class="bg-white border rounded-xl p-6 shadow-sm flex flex-col justify-between">
                         <div>
-                            <span class="text-xs font-bold text-gray-500">HTML Attuale:</span>
-                            <div class="text-xs text-gray-600 bg-gray-50 p-3 rounded border max-h-48 overflow-y-auto font-mono mt-1">{current_body}</div>
+                            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 pb-2 border-b">Situazione Attuale (Originale)</h3>
+                            <div class="mb-4">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Titolo Prodotto:</span>
+                                <p class="text-gray-800 font-medium text-base">{title}</p>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Descrizione HTML Attuale:</span>
+                                <!-- Altezza aumentata a h-96 (circa 384px) e font più leggibile -->
+                                <div class="text-sm text-gray-700 bg-gray-50 p-4 rounded-lg border h-96 overflow-y-auto font-mono mt-1 leading-relaxed">
+                                    {current_body if current_body else '<em>Nessuna descrizione presente</em>'}
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="bg-white border border-green-200 rounded-xl p-6 shadow-sm bg-green-50/30">
-                        <h3 class="text-sm font-semibold text-green-600 uppercase tracking-wider mb-3">Proposta IA (Ottimizzata)</h3>
-                        <div class="mb-3">
-                            <span class="text-xs font-bold text-gray-500">Meta Title ({len(seo_title)} caratteri):</span>
-                            <p class="text-blue-600 font-semibold">{seo_title}</p>
-                        </div>
-                        <div class="mb-3">
-                            <span class="text-xs font-bold text-gray-500">Meta Description ({len(seo_desc)} caratteri):</span>
-                            <p class="text-gray-700 text-sm">{seo_desc}</p>
-                        </div>
+                    <!-- COLONNA 2: PROPOSTA IA -->
+                    <div class="bg-white border border-green-300 rounded-xl p-6 shadow-md bg-green-50/20 flex flex-col justify-between">
                         <div>
-                            <span class="text-xs font-bold text-gray-500">Nuovo HTML:</span>
-                            <div class="text-xs text-gray-600 bg-white p-3 rounded border max-h-48 overflow-y-auto font-mono mt-1">{body_html}</div>
+                            <h3 class="text-xs font-bold text-green-700 uppercase tracking-wider mb-4 pb-2 border-b border-green-200">Proposta IA (Ottimizzata)</h3>
+                            <div class="mb-3">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Title ({len(seo_title)} caratteri):</span>
+                                <p class="text-blue-700 font-semibold text-base bg-blue-50/50 p-2 rounded border border-blue-100">{seo_title}</p>
+                            </div>
+                            <div class="mb-4">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Description ({len(seo_desc)} caratteri):</span>
+                                <p class="text-gray-700 text-sm bg-gray-50/80 p-2.5 rounded border border-gray-200">{seo_desc}</p>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Nuovo HTML Ottimizzato:</span>
+                                <!-- Altezza aumentata a h-96 (circa 384px) e spaziatura comoda -->
+                                <div class="text-sm text-gray-800 bg-white p-4 rounded-lg border border-green-200 h-96 overflow-y-auto font-mono mt-1 leading-relaxed">
+                                    {body_html}
+                                </div>
+                            </div>
                         </div>
                     </div>
+
                 </div>
 
-                <div class="flex justify-end gap-4 bg-white p-4 rounded-xl border shadow-sm">
-                    <a href="/pending-products" class="px-5 py-2.5 rounded-lg border text-gray-700 hover:bg-gray-50 font-medium text-sm">Annulla</a>
-                    <a href="/apply/{product_id}" class="px-6 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white font-medium text-sm shadow">Approva e Scrivi su Shopify</a>
+                <!-- BARRA IN BASSO CON I PULSANTI -->
+                <div class="flex justify-end gap-4 bg-white p-5 rounded-xl border shadow-sm items-center">
+                    <a href="/" class="px-6 py-2.5 rounded-lg border text-gray-700 hover:bg-gray-50 font-medium text-sm transition">Annulla</a>
+                    <a href="/apply/{product_id}" class="px-8 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold text-sm shadow-md transition">Approva e Scrivi su Shopify &rarr;</a>
                 </div>
             </div>
         </body>
@@ -193,7 +232,7 @@ def preview_product_optimization(product_id: str):
 
 @app.get("/apply/{product_id}", response_class=HTMLResponse)
 def apply_product_optimization(product_id: str):
-    """Applica l'ottimizzazione su Shopify, aggiunge il tag e mostra la pagina di successo."""
+    """Applica l'ottimizzazione su Shopify per lo specifico ID."""
     try:
         url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
         response = requests.get(url, headers=agent.headers)
@@ -225,8 +264,8 @@ def apply_product_optimization(product_id: str):
                     <h1 class="text-2xl font-bold text-gray-800 mb-2">Aggiornato con Successo!</h1>
                     <p class="text-gray-600 mb-6">Il prodotto <strong>{title}</strong> è stato aggiornato su Shopify e taggato come <span class="bg-gray-100 font-mono text-xs px-2 py-1 rounded">Ottimizzato IA</span>.</p>
                     <div class="flex justify-center gap-4">
-                        <a href="/pending-products" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-lg shadow transition">
-                            Passa al prossimo prodotto &rarr;
+                        <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-lg shadow transition">
+                            Torna alla Home &rarr;
                         </a>
                     </div>
                 </div>
