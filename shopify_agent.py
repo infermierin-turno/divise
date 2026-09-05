@@ -17,7 +17,6 @@ class ShopifyCoffeeAgent:
             "Content-Type": "application/json"
         }
         
-        # Forziamo l'utilizzo dell'header nativo di Shopify per qualsiasi token fornito (incluso atkn_)
         if self.access_token:
             self.headers["X-Shopify-Access-Token"] = self.access_token
         elif self.client_id and self.client_secret:
@@ -26,15 +25,20 @@ class ShopifyCoffeeAgent:
             self.headers["Authorization"] = f"Basic {encoded_auth}"
 
     def get_products(self, limit=20):
-        """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
+        """Recupera l'elenco dei prodotti dal negozio Shopify verificando vari parametri."""
         url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
         response = requests.get(url, headers=self.headers)
         
-        print(f"[DEBUG SHOPIFY] Status Code Risposta: {response.status_code}")
-        print(f"[DEBUG SHOPIFY] Contenuto Risposta: {response.text[:300]}")
+        print(f"[DEBUG SHOPIFY] Status Code Risposta Prodotti: {response.status_code}")
+        print(f"[DEBUG SHOPIFY] Contenuto Risposta Completo: {response.text}")
         
         if response.status_code == 200:
-            return response.json().get("products", [])
+            products = response.json().get("products", [])
+            if not products:
+                count_url = f"{self.shop_url}/admin/api/2024-01/products/count.json"
+                count_resp = requests.get(count_url, headers=self.headers)
+                print(f"[DEBUG SHOPIFY] Conteggio totale prodotti sullo store: {count_resp.text}")
+            return products
         else:
             print(f"[ERRORE] Impossibile recuperare i prodotti: {response.status_code} - {response.text}")
             return []
