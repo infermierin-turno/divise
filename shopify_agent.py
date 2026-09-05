@@ -1,38 +1,50 @@
 import os
 import json
-import base64
 import requests
 from openai import OpenAI
 
 class ShopifyCoffeeAgent:
-    def __init__(self, shop_url, openai_api_key, client_id=None, client_secret=None, access_token=None, **kwargs):
+    def __init__(self, shop_url, openai_api_key, client_id=None, client_secret=None, **kwargs):
         self.shop_url = shop_url.rstrip('/')
         self.ai_client = OpenAI(api_key=openai_api_key)
         
         self.client_id = client_id or os.getenv("SHOPIFY_CLIENT_ID") or os.getenv("SHOPIFY_API_KEY")
         self.client_secret = client_secret or os.getenv("SHOPIFY_CLIENT_SECRET") or os.getenv("SHOPIFY_SECRET") or os.getenv("SHOPIFY_API_SECRET")
-        self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
+        
+        # Genera automaticamente il token di accesso usando le credenziali OAuth
+        self.access_token = self._get_admin_access_token()
         
         self.headers = {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": self.access_token if self.access_token else ""
+        }
+
+    def _get_admin_access_token(self):
+        """Ottiene dinamicamente il token di accesso admin usando Client ID e Client Secret."""
+        if not self.client_id or not self.client_secret:
+            print("[AVVISO] Client ID o Client Secret mancanti per la generazione OAuth.")
+            return None
+
+        auth_url = f"{self.shop_url}/admin/oauth/access_token"
+        payload = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "client_credentials"
         }
         
-        # Configurazione intelligente delle credenziali in base a ciò che è disponibile
-        if self.access_token:
-            if self.access_token.startswith("atkn_"):
-                # I token atkn_ solitamente richiedono Bearer authentication o header specifici
-                self.headers["Authorization"] = f"Bearer {self.access_token}"
+        try:
+            response = requests.post(auth_url, data=payload)
+            if response.status_code == 200:
+                data = response.json()
+                token = data.get("access_token")
+                print("[SUCCESSO] Token di accesso Shopify generato correttamente.")
+                return token
             else:
-                self.headers["X-Shopify-Access-Token"] = self.access_token
-        elif self.client_id and self.client_secret:
-            auth_string = f"{self.client_id}:{self.client_secret}"
-            encoded_auth = base64.b64encode(auth_string.encode()).decode()
-            self.headers["Authorization"] = f"Basic {encoded_auth}"
-        elif self.client_secret:
-            # Se abbiamo solo il secret (shpss_...), a volte viene accettato come password con un utente vuoto o l'app ID
-            auth_string = f":{self.client_secret}"
-            encoded_auth = base64.b64encode(auth_string.encode()).decode()
-            self.headers["Authorization"] = f"Basic {encoded_auth}"
+                print(f"[AVVISO] OAuth standard non riuscito ({response.status_code}: {response.text}).")
+                return self.client_secret
+        except Exception as e:
+            print(f"Errore durante la richiesta del token Shopify: {e}")
+            return None
 
     def get_products(self, limit=20):
         """Recupera l'elenco dei prodotti dal negozio Shopify."""
@@ -61,7 +73,7 @@ Devi restituire esclusivamente un oggetto JSON valido (senza blocchi di markdown
 {
   "seo_title": "Stringa di massimo 55-60 caratteri, ottimizzata per Google e per il click",
   "seo_description": "Stringa tra i 140 e i 155 caratteri, persuasiva e ricca di valore per i clienti",
-  "body_html": "HTML puro (strutturato con <h2>, <p>, <ul>, <li>, <strong>) con la descrizione dettagliata"
+  "body_html": "Il codice HTML puro (strutturato con <h2>, <p>, <ul>, <li>, <strong>) con la descrizione dettagliata"
 }
 
 Non aggiungere alcun testo prima o dopo il JSON.
