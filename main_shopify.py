@@ -1,7 +1,8 @@
 import os
+import json
 import requests
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from shopify_agent import ShopifyCoffeeAgent
 
 app = FastAPI(title="Shopify Divise SEO & AI Agent")
@@ -17,6 +18,158 @@ agent = ShopifyCoffeeAgent(
     client_id=client_id,
     client_secret=client_secret
 )
+
+def generate_complete_faq(product_title, variants, body_html=""):
+    """Genera un blocco FAQ Schema completo (4 domande professionali) basato su titolo, varianti e descrizione."""
+    variants_text = ", ".join([v.get("title", "") for v in variants if v.get("title")]) if variants else "Diverse opzioni disponibili"
+    
+    clean_body_snippet = "progettato per garantire il massimo comfort e praticità in ambito lavorativo."
+    if body_html and len(body_html) > 30:
+        clean_body_snippet = "ideale per chi opera in contesti professionali grazie a materiali resistenti e funzionali."
+
+    faq_list = [
+        {
+            "@type": "Question",
+            "name": f"Quali sono le caratteristiche principali di {product_title}?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": f"Il capo {product_title} è {clean_body_snippet} Assicura un'ottima resa estetica e una lunga durata nel tempo."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": f"Quali taglie o varianti sono disponibili per {product_title}?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": f"Il prodotto è disponibile nelle seguenti varianti: {variants_text}. Per la scelta della misura corretta, puoi consultare la nostra <a href=\"/pages/guida-alle-taglie\">guida alle taglie</a>."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Come bisogna curare e lavare questo capo professionale?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "I nostri capi professionali sono studiati per resistere a lavaggi frequenti. Si consiglia di seguire le indicazioni riportate sull'etichetta interna per preservare al meglio i colori e la consistenza del tessuto."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "È possibile personalizzare il prodotto con il logo aziendale?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Sì, la maggior parte dei nostri capi di abbigliamento professionale può essere personalizzata con ricami o stampe del proprio logo. Contattaci per maggiori informazioni sui servizi di personalizzazione."
+            }
+        }
+    ]
+    return faq_list
+
+def requests_post_safe(url, query, headers):
+    try:
+        return requests.post(url, json={"query": query}, headers=headers)
+    except Exception as e:
+        print(f"Errore di rete: {e}")
+        return None
+
+def bulk_add_missing_faqs():
+    graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
+    
+    query = """
+    {
+      products(first: 250) {
+        edges {
+          node {
+            id
+            title
+            descriptionHtml
+            variants(first: 20) {
+              edges {
+                node {
+                  title
+                }
+              }
+            }
+            metafield(namespace: "custom", key: "faq_schema") {
+              id
+            }
+          }
+        }
+      }
+    }
+    """
+
+    response = requests_post_safe(graphql_url, query, agent.headers)
+    if not response or response.status_code != 200:
+        raise Exception("Impossibile recuperare l'elenco dei prodotti da Shopify.")
+
+    edges = response.json().get("data", {}).get("products", {}).get("edges", [])
+    updated_count = 0
+
+    for edge in edges:
+        node = edge.get("node", {})
+        raw_id = node.get("id", "")
+        product_id = raw_id.split("/")[-1] if raw_id else ""
+        title = node.get("title", "Prodotto")
+        body_html = node.get("descriptionHtml", "")
+        has_faq_metafield = node.get("metafield") is not None
+
+        if has_faq_metafield:
+            continue
+
+        variants_list = []
+        for v_edge in node.get("variants", {}).get("edges", []):
+            variants_list.append(v_edge.get("node", {}))
+
+        faq_obj = generate_complete_faq(title, variants_list, body_html)
+
+        metafield_mutation = """
+        mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields {
+              id
+              namespace
+              key
+              value
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+        """
+        metafield_variables = {
+            "metafields": [
+                {
+                    "ownerId": f"gid://shopify/Product/{product_id}",
+                    "namespace": "custom",
+                    "key": "faq_schema",
+                    "type": "json",
+                    "value": json.dumps(faq_obj, ensure_ascii=False)
+                }
+            ]
+        }
+
+        meta_resp = requests.post(graphql_url, json={"query": metafield_mutation, "variables": metafield_variables}, headers=agent.headers)
+        if meta_resp.status_code == 200:
+            meta_data = meta_resp.json()
+            meta_errors = meta_data.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
+            if not meta_errors:
+                updated_count += 1
+
+    return updated_count
+
+@app.get("/run-bulk-faqs")
+def trigger_bulk_faqs(key: str = ""):
+    """Endpoint protetto per avviare l'aggiornamento massivo delle FAQ sui prodotti mancanti."""
+    secret_key = os.getenv("BULK_SECRET_KEY", "unasegretafacile")
+    if key != secret_key:
+        raise HTTPException(status_code=403, detail="Non autorizzato: chiave errata o mancante.")
+
+    try:
+        count = bulk_add_missing_faqs()
+        return {"status": "success", "message": f"Aggiornamento massivo completato. Aggiunti FAQ Schema a {count} prodotti."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/", response_class=HTMLResponse)
 def read_root():
@@ -162,7 +315,6 @@ def preview_product_optimization(product_id: str):
             <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
         </head>
         <body class="bg-gray-50 text-gray-900 font-sans antialiased">
-            <!-- Utilizziamo max-w-6xl per allargare lo spazio visivo -->
             <div class="max-w-6xl mx-auto p-8">
                 <header class="mb-8 border-b pb-4 flex justify-between items-center">
                     <div>
@@ -172,7 +324,6 @@ def preview_product_optimization(product_id: str):
                     <a href="/" class="text-blue-600 hover:underline text-sm font-medium">&larr; Torna alla Home</a>
                 </header>
 
-                <!-- Griglia a due colonne ben spaziata e più alta -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                     
                     <!-- COLONNA 1: SITUAZIONE ATTUALE -->
@@ -185,7 +336,6 @@ def preview_product_optimization(product_id: str):
                             </div>
                             <div>
                                 <span class="text-xs font-bold text-gray-500 block mb-1">Descrizione HTML Attuale:</span>
-                                <!-- Altezza aumentata a h-96 (circa 384px) e font più leggibile -->
                                 <div class="text-sm text-gray-700 bg-gray-50 p-4 rounded-lg border h-96 overflow-y-auto font-mono mt-1 leading-relaxed">
                                     {current_body if current_body else '<em>Nessuna descrizione presente</em>'}
                                 </div>
@@ -207,7 +357,6 @@ def preview_product_optimization(product_id: str):
                             </div>
                             <div>
                                 <span class="text-xs font-bold text-gray-500 block mb-1">Nuovo HTML Ottimizzato:</span>
-                                <!-- Altezza aumentata a h-96 (circa 384px) e spaziatura comoda -->
                                 <div class="text-sm text-gray-800 bg-white p-4 rounded-lg border border-green-200 h-96 overflow-y-auto font-mono mt-1 leading-relaxed">
                                     {body_html}
                                 </div>
@@ -217,7 +366,6 @@ def preview_product_optimization(product_id: str):
 
                 </div>
 
-                <!-- BARRA IN BASSO CON I PULSANTI -->
                 <div class="flex justify-end gap-4 bg-white p-5 rounded-xl border shadow-sm items-center">
                     <a href="/" class="px-6 py-2.5 rounded-lg border text-gray-700 hover:bg-gray-50 font-medium text-sm transition">Annulla</a>
                     <a href="/apply/{product_id}" class="px-8 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold text-sm shadow-md transition">Approva e Scrivi su Shopify &rarr;</a>
