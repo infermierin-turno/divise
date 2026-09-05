@@ -90,7 +90,6 @@ class ShopifyCoffeeAgent:
                 raw_id = node.get("id", "")
                 numeric_id = raw_id.split("/")[-1] if raw_id else ""
                 
-                # Estrazione pulita delle varianti
                 variants_list = []
                 for v_edge in node.get("variants", {}).get("edges", []):
                     v_node = v_edge.get("node", {})
@@ -131,11 +130,20 @@ class ShopifyCoffeeAgent:
                     break
         return pending
 
-    def optimize_divise_content(self, product_data):
-        """Usa l'IA integrando dati del prodotto e delle varianti per generare contenuti e FAQ Schema dettagliate."""
+    def optimize_divise_content(self, product_data_or_title, current_body=None, variants=None):
+        """Gestisce in modo flessibile sia il passaggio di un dizionario unico sia di argomenti separati."""
+        if isinstance(product_data_or_title, dict):
+            product_data = product_data_or_title
+        else:
+            product_data = {
+                "title": product_data_or_title,
+                "body_html": current_body,
+                "variants": variants or []
+            }
+
         title = product_data.get("title")
-        current_body = product_data.get("body_html")
-        variants = product_data.get("variants", [])
+        body = product_data.get("body_html")
+        var_list = product_data.get("variants", [])
 
         system_prompt = """Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
 
@@ -158,7 +166,7 @@ Non descrivere un prodotto come antibatterico, antimacchia, ignifugo, impermeabi
 
 Se un'informazione non è disponibile, omettila. Non fare supposizioni e non presentare come certe informazioni generiche normalmente associate a quel tipo di prodotto.
 
-La descrizione HTML deve essere ordinata e leggibile e può contenere:
+La descrizione HTML deve essere ordinata e legibile e può contenere:
 - un'introduzione con <p>;
 - titoli <h2> descrittivi;
 - elenchi puntati con <ul> e <li>;
@@ -211,10 +219,10 @@ Nome prodotto:
 {title}
 
 Descrizione attuale:
-{current_body or "Nessuna descrizione disponibile"}
+{body or "Nessuna descrizione disponibile"}
 
 Varianti disponibili (colori, taglie, prezzi, SKU):
-{json.dumps(variants, ensure_ascii=False, indent=2)}
+{json.dumps(var_list, ensure_ascii=False, indent=2)}
 
 Usa le informazioni disponibili nella descrizione e nelle varianti come fonte principale.
 Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o frasi generiche.
@@ -241,7 +249,6 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
         """Recupera le immagini del prodotto e aggiorna automaticamente il loro Alt Text per la SEO."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
-        # 1. Recupera le immagini collegate al prodotto
         query_images = f"""
         {{
           product(id: "gid://shopify/Product/{product_id}") {{
@@ -265,7 +272,6 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
         if not edges:
             return True
 
-        # 2. Mutazione per aggiornare l'altText di ogni immagine
         mutation_alt = """
         mutation productUpdateMedia($media: [CreateMediaInput!]!, $productId: ID!) {
           productUpdateMedia(media: $media, productId: $productId) {
@@ -284,7 +290,6 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
         media_inputs = []
         for i, edge in enumerate(edges):
             img_id = edge.get("node", {}).get("id")
-            # Crea un Alt text pulito, professionale e descrittivo per Google Immagini
             alt_text = f"{product_title} - Vista {i+1} abbigliamento professionale"
             media_inputs.append({
                 "id": img_id,
@@ -311,7 +316,6 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
         """Aggiorna su Shopify descrizione, SEO, tag, Metafield FAQ Schema e Alt Text delle immagini."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
-        # 1. Recuperiamo i tag attuali e il titolo del prodotto (utile per gli alt text)
         get_query = f"""
         {{
           product(id: "gid://shopify/Product/{product_id}") {{
@@ -333,7 +337,6 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
         if tag_to_add not in tags_list:
             tags_list.append(tag_to_add)
 
-        # 2. Mutazione GraphQL per aggiornare prodotto, HTML, SEO e tag
         mutation = """
         mutation productUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
@@ -376,7 +379,6 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
                 print(f"[ERRORE GRAPHQL PRODOTTO] {user_errors}")
                 return False
             
-            # 3. Salvataggio del Metafield FAQ Schema (namespace: custom, key: faq_schema)
             faq_obj = seo_data.get("faq_schema")
             if faq_obj:
                 metafield_mutation = """
@@ -418,7 +420,6 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
                 else:
                     print(f"[ERRORE HTTP METAFIELD] {meta_resp.text}")
 
-            # 4. Ottimizzazione automatica Alt Text delle immagini collegate
             self.update_product_image_alt_texts(product_id, product_title)
 
             print(f"[SUCCESSO] Prodotto ID {product_id} aggiornato completamente via GraphQL!")
