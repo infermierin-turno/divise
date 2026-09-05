@@ -1,10 +1,10 @@
 import os
 from fastapi import FastAPI, HTTPException
 from shopify_agent import ShopifyCoffeeAgent
+from openai import OpenAI
 
 app = FastAPI(title="Shopify Divise SEO & AI Agent")
 
-# Legge correttamente la variabile SHOP_URL configurata su Render (fallback su divisedivise.it)
 shop_url = os.getenv("SHOP_URL") or os.getenv("SHOPIFY_SHOP_URL", "https://divisedivise.it")
 openai_api_key = os.getenv("OPENAI_API_KEY")
 client_id = os.getenv("SHOPIFY_CLIENT_ID")
@@ -16,6 +16,8 @@ agent = ShopifyCoffeeAgent(
     client_id=client_id,
     client_secret=client_secret
 )
+
+ai_debugger = OpenAI(api_key=openai_api_key)
 
 @app.get("/")
 def read_root():
@@ -35,38 +37,38 @@ def read_root():
             "message": str(e)
         }
 
-@app.post("/optimize-products")
-def optimize_products(limit: int = 10):
-    """Avvia il processo di ottimizzazione IA (SEO + HTML) per i prodotti di Shopify."""
-    products = agent.get_products(limit=limit)
-    if not products:
-        raise HTTPException(status_code=404, detail="Nessun prodotto trovato o errore di connessione con Shopify.")
+@app.get("/debug-shopify")
+def debug_shopify_with_ai():
+    import requests
+    """Interroga direttamente Shopify e chiede a OpenAI di analizzare perché l'array è vuoto."""
+    url = f"{shop_url}/admin/api/2024-07/products.json?status=any"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": agent.access_token if agent.access_token else ""
+    }
     
-    results = []
-    for p in products:
-        prod_id = p.get("id")
-        title = p.get("title")
-        body = p.get("body_html") or ""
-        
-        seo_data = agent.optimize_divise_content(title, body)
-        if seo_data:
-            success = agent.update_product_seo_and_description(prod_id, seo_data)
-            results.append({
-                "product_id": prod_id,
-                "title": title,
-                "success": success,
-                "seo_title_generated": seo_data.get("seo_title")
-            })
-        else:
-            results.append({
-                "product_id": prod_id,
-                "title": title,
-                "success": False,
-                "error": "Generazione IA fallita o formato non valido"
-            })
-            
+    response = requests.get(url, headers=headers)
+    response_text = response.text
+    status_code = response.status_code
+    
+    # Chiediamo a OpenAI di analizzare la risposta di Shopify
+    prompt = f"""
+    Sto sviluppando un'integrazione con Shopify Admin API.
+    Ho fatto una richiesta GET a: {url}
+    Il Server ha risposto con Status Code: {status_code}
+    Il corpo della risposta è: {response_text}
+    
+    Tuttavia, il pannello di amministrazione Shopify mostra che i prodotti ci sono. 
+    Analizza la risposta e spiega in modo tecnico qual è la causa del problema (es. permessi mancanti, token errato, versione API, o filtri) e come risolverlo.
+    """
+    
+    ai_response = ai_debugger.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
     return {
-        "status": "completed",
-        "processed_products": len(results),
-        "details": results
+        "status_code": status_code,
+        "raw_shopify_response": response_text,
+        "openai_diagnosis": ai_response.choices[0].message.content
     }
