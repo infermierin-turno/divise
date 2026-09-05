@@ -46,12 +46,13 @@ class ShopifyCoffeeAgent:
             return None
 
     def get_products(self, limit=50):
-        """Verifica l'account connesso e recupera l'elenco completo dei prodotti."""
+        """Verifica l'account connesso e recupera l'elenco completo dei prodotti senza filtri di pubblicazione."""
         shop_info_url = f"{self.shop_url}/admin/api/2024-07/shop.json"
         shop_resp = requests.get(shop_info_url, headers=self.headers)
         print(f"[DEBUG SHOP INFO] Risposta Shop: {shop_resp.status_code} - {shop_resp.text}")
 
-        url = f"{self.shop_url}/admin/api/2024-07/products.json?limit={limit}&status=any"
+        # Aggiunto published_status=any per includere bozze e prodotti non pubblicati su canali specifici
+        url = f"{self.shop_url}/admin/api/2024-07/products.json?limit={limit}&status=any&published_status=any"
         response = requests.get(url, headers=self.headers)
         
         print(f"[DEBUG SHOPIFY] Status Code Risposta Prodotti: {response.status_code}")
