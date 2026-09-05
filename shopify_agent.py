@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import requests
 from openai import OpenAI
 
@@ -9,28 +10,24 @@ class ShopifyCoffeeAgent:
         self.ai_client = OpenAI(api_key=openai_api_key)
         
         self.client_id = client_id or os.getenv("SHOPIFY_CLIENT_ID") or os.getenv("SHOPIFY_API_KEY")
-        self.client_secret = client_secret or os.getenv("SHOPIFY_CLIENT_SECRET") or os.getenv("SHOPIFY_SECRET")
+        self.client_secret = client_secret or os.getenv("SHOPIFY_CLIENT_SECRET") or os.getenv("SHOPIFY_SECRET") or os.getenv("SHOPIFY_API_SECRET")
         self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
         
-        # Per le API di Shopify, se disponiamo di un access token diretto lo usiamo, 
-        # altrimenti se abbiamo la chiave API/Client ID e il secret (shpss_), 
-        # configuriamo l'autenticazione HTTP Basic o l'header basato su di essi.
-        self.token = self.access_token
-        
-        # Prepariamo gli headers di autenticazione standard per Shopify Admin API
         self.headers = {
             "Content-Type": "application/json"
         }
         
-        if self.token:
-            self.headers["X-Shopify-Access-Token"] = self.token
+        # Se è disponibile un access token diretto (es. che inizia per shpat_), usiamo l'header dedicato
+        if self.access_token and self.access_token.startswith("shpat_"):
+            self.headers["X-Shopify-Access-Token"] = self.access_token
         elif self.client_id and self.client_secret:
-            # Se stiamo usando le credenziali API (chiave e segreto), le passiamo come token o autenticazione
-            # Nota: se Shopify richiede la chiave API come username e il secret come password per Basic Auth:
-            import base64
+            # Autenticazione Basic con API Key (username) e Secret (password, es. eshpss_...)
             auth_string = f"{self.client_id}:{self.client_secret}"
             encoded_auth = base64.b64encode(auth_string.encode()).decode()
             self.headers["Authorization"] = f"Basic {encoded_auth}"
+        elif self.access_token:
+            # Se la variabile d'ambiente dell'access token contiene direttamente il secret o una chiave mista
+            self.headers["X-Shopify-Access-Token"] su self.access_token
 
     def get_products(self, limit=20):
         """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
@@ -98,7 +95,7 @@ Descrizione Attuale: {current_body}
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
         """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag."""
         get_url = f"{self.shop_url}/admin/api/2024-01/products/{product_id}.json"
-        get_resp = requests.get(get_url, headers=self.headers)
+        get_resp = requests.get(get_url, headers=_{self.headers}) # correzione interna headers
         
         current_tags_str = ""
         if get_resp.status_code == 200:
