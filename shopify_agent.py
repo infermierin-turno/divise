@@ -17,15 +17,25 @@ class ShopifyCoffeeAgent:
             "Content-Type": "application/json"
         }
         
+        # Configurazione intelligente delle credenziali in base a ciò che è disponibile
         if self.access_token:
-            self.headers["X-Shopify-Access-Token"] = self.access_token
+            if self.access_token.startswith("atkn_"):
+                # I token atkn_ solitamente richiedono Bearer authentication o header specifici
+                self.headers["Authorization"] = f"Bearer {self.access_token}"
+            else:
+                self.headers["X-Shopify-Access-Token"] = self.access_token
         elif self.client_id and self.client_secret:
             auth_string = f"{self.client_id}:{self.client_secret}"
             encoded_auth = base64.b64encode(auth_string.encode()).decode()
             self.headers["Authorization"] = f"Basic {encoded_auth}"
+        elif self.client_secret:
+            # Se abbiamo solo il secret (shpss_...), a volte viene accettato come password con un utente vuoto o l'app ID
+            auth_string = f":{self.client_secret}"
+            encoded_auth = base64.b64encode(auth_string.encode()).decode()
+            self.headers["Authorization"] = f"Basic {encoded_auth}"
 
     def get_products(self, limit=20):
-        """Recupera l'elenco dei prodotti dal negozio Shopify verificando vari parametri."""
+        """Recupera l'elenco dei prodotti dal negozio Shopify."""
         url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
         response = requests.get(url, headers=self.headers)
         
@@ -33,12 +43,7 @@ class ShopifyCoffeeAgent:
         print(f"[DEBUG SHOPIFY] Contenuto Risposta Completo: {response.text}")
         
         if response.status_code == 200:
-            products = response.json().get("products", [])
-            if not products:
-                count_url = f"{self.shop_url}/admin/api/2024-01/products/count.json"
-                count_resp = requests.get(count_url, headers=self.headers)
-                print(f"[DEBUG SHOPIFY] Conteggio totale prodotti sullo store: {count_resp.text}")
-            return products
+            return response.json().get("products", [])
         else:
             print(f"[ERRORE] Impossibile recuperare i prodotti: {response.status_code} - {response.text}")
             return []
@@ -56,7 +61,7 @@ Devi restituire esclusivamente un oggetto JSON valido (senza blocchi di markdown
 {
   "seo_title": "Stringa di massimo 55-60 caratteri, ottimizzata per Google e per il click",
   "seo_description": "Stringa tra i 140 e i 155 caratteri, persuasiva e ricca di valore per i clienti",
-  "body_html": "Il codice HTML puro (strutturato con <h2>, <p>, <ul>, <li>, <strong>) con la descrizione dettagliata"
+  "body_html": "HTML puro (strutturato con <h2>, <p>, <ul>, <li>, <strong>) con la descrizione dettagliata"
 }
 
 Non aggiungere alcun testo prima o dopo il JSON.
