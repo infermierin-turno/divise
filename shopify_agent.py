@@ -67,29 +67,41 @@ class ShopifyCoffeeAgent:
         
         response = requests.post(graphql_url, json={"query": query}, headers=self.headers)
         
-        print(f"[DEBUG GRAPHQL] Status Code: {response.status_code}")
-        print(f"[DEBUG GRAPHQL] Risposta: {response.text}")
-        
         if response.status_code == 200:
             data = response.json()
             edges = data.get("data", {}).get("products", {}).get("edges", [])
-            # Convertiamo il formato GraphQL in una struttura pulita simile alla REST API
             products = []
             for edge in edges:
                 node = edge.get("node", {})
-                # Pulisciamo l'ID GraphQL (es. gid://shopify/Product/123 -> 123)
                 raw_id = node.get("id", "")
                 numeric_id = raw_id.split("/")[-1] if raw_id else ""
                 products.append({
                     "id": numeric_id,
                     "title": node.get("title"),
                     "body_html": node.get("descriptionHtml"),
-                    "tags": ", ".join(node.get("tags", []))
+                    "tags": node.get("tags", [])
                 })
             return products
         else:
             print(f"[ERRORE] Impossibile recuperare i prodotti via GraphQL: {response.text}")
             return []
+
+    def get_pending_products(self, limit=3):
+        """Restituisce i primi N prodotti che non hanno il tag 'Ottimizzato IA'."""
+        all_products = self.get_products(limit=50)
+        pending = []
+        for p in all_products:
+            tags = p.get("tags", [])
+            if isinstance(tags, str):
+                tags_list = [t.strip() for t in tags.split(",")]
+            else:
+                tags_list = tags
+            
+            if "Ottimizzato IA" not in tags_list:
+                pending.append(p)
+                if len(pending) >= limit:
+                    break
+        return pending
 
     def optimize_divise_content(self, title, current_body):
         """Usa l'IA per generare HTML del corpo, Meta Title e Meta Description ottimizzati SEO per le divise."""
@@ -141,7 +153,7 @@ Descrizione Attuale: {current_body}
             return None
 
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
-        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag."""
+        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e aggiunge il tag per saltarlo in futuro."""
         get_url = f"{self.shop_url}/admin/api/2024-07/products/{product_id}.json"
         get_resp = requests.get(get_url, headers=self.headers)
         
@@ -170,7 +182,7 @@ Descrizione Attuale: {current_body}
         response = requests.put(put_url, json=payload, headers=self.headers)
         
         if response.status_code == 200:
-            print(f"[SUCCESSO] Prodotto ID {product_id} ottimizzato con HTML e Meta Tag SEO!")
+            print(f"[SUCCESSO] Prodotto ID {product_id} ottimizzato e taggato con '{tag_to_add}'!")
             return True
         else:
             print(f"[ERRORE] Impossibile aggiornare il prodotto {product_id}: {response.text}")
