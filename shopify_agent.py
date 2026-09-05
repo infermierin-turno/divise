@@ -149,15 +149,18 @@ class ShopifyCoffeeAgent:
 
 Scrivi descrizioni per un e-commerce professionale. La voce del brand è competente, concreta, affidabile e rassicurante. Il tono è professionale ma naturale, diretto e comprensibile. Usa frasi brevi, verbi attivi e informazioni utili per aiutare il cliente nella scelta.
 
-Metti in evidenza, solo quando sono presenti nella descrizione originale o nelle varianti del prodotto:
+Metti in evidenza:
 - comfort e libertà di movimento;
 - vestibilità;
 - tessuti e composizione;
 - resistenza ai lavaggi;
 - facilità di manutenzione;
-- tasche, chiusure, elasticità e dettagli funzionali;
+- tasche, chiusure, elasticità e dettagli funzionali se presenti nel testo originale;
 - utilizzo professionale consigliato;
-- possibilità di personalizzazione.
+- possibilità di personalizzazione tranne che per scarpe e pantaloni;
+- informazioni utili per favorire la decisione d’acquisto;
+- il problema o bisogno risolto dal prodotto;
+- contesti professionali adatti.
 
 REGOLA FONDAMENTALE:
 Non inventare mai caratteristiche, materiali, certificazioni, proprietà tecniche, vestibilità, colori, misure o prestazioni non presenti nelle informazioni fornite.
@@ -179,27 +182,18 @@ REGOLE SEO:
 - seo_description: idealmente tra 140 e 155 caratteri, naturale e utile per il cliente;
 - non inserire parole chiave in modo artificiale.
 
-REGOLE PER IL FAQ SCHEMA:
-Sfrutta le varianti reali fornite (colori, taglie, prezzi, SKU) per creare domande e risposte mirate e veritiere (es. varianti di colore disponibili, prezzi o taglie).
-Genera un array JSON con domande e risposte utili strutturate esattamente in questo formato:
-[
-  {
-    "@type": "Question",
-    "name": "Domanda...",
-    "acceptedAnswer": {
-      "@type": "Answer",
-      "text": "Risposta..."
-    }
-  }
-]
-Basati unicamente sulle informazioni certe del prodotto e delle sue varianti.
+REGOLE TASSATIVE PER L'OUTPUT JSON:
+Devi restituire ESCLUSIVAMENTE un oggetto JSON valido contenente queste precise chiavi di primo livello:
+1. "seo_title" (stringa)
+2. "seo_description" (stringa)
+3. "body_html" (stringa HTML)
+4. "faq_schema" (array di oggetti JSON, obbligatorio, strutturato esattamente con `@type: "Question"`, `name` e `acceptedAnswer` con `@type: "Answer"` e `text`).
 
-REGOLE TASSATIVE PER L'OUTPUT:
-Devi restituire esclusivamente un oggetto JSON valido con questa struttura esatta:
+Esempio di struttura richiesta:
 {
-  "seo_title": "Titolo SEO",
-  "seo_description": "Descrizione SEO",
-  "body_html": "<p>Descrizione HTML...</p>",
+  "seo_title": "...",
+  "seo_description": "...",
+  "body_html": "<p>...</p>",
   "faq_schema": [
     {
       "@type": "Question",
@@ -221,11 +215,8 @@ Nome prodotto:
 Descrizione attuale:
 {body or "Nessuna descrizione disponibile"}
 
-Varianti disponibili (colori, taglie, prezzi, SKU):
-{json.dumps(var_list, ensure_ascii=False, indent=2)}
-
-Usa le informazioni disponibili nella descrizione e nelle varianti come fonte principale.
-Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o frasi generiche.
+Varianti del prodotto:
+{json.dumps(var_list, ensure_ascii=False)}
 """
 
         try:
@@ -235,11 +226,27 @@ Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o fr
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.5,
+                temperature=0.3,
                 response_format={"type": "json_object"}
             )
             raw_content = response.choices[0].message.content.strip()
             data = json.loads(raw_content)
+            
+            # Controllo di sicurezza: se l'IA dimentica il faq_schema, lo generiamo noi di fallback basato sulle varianti
+            if not data.get("faq_schema") or not isinstance(data.get("faq_schema"), list):
+                fallback_faqs = []
+                if var_list:
+                    variants_text = ", ".join([v.get("title", "") for v in var_list if v.get("title")])
+                    fallback_faqs.append({
+                        "@type": "Question",
+                        "name": f"Quali varianti sono disponibili per {title}?",
+                        "acceptedAnswer": {
+                            "@type": "Answer",
+                            "text": f"Il prodotto {title} è disponibile nelle seguenti varianti: {variants_text}."
+                        }
+                    })
+                data["faq_schema"] = fallback_faqs
+
             return data
         except Exception as e:
             print(f"Errore durante la generazione o il parsing JSON dall'IA: {e}")
