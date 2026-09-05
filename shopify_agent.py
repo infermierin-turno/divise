@@ -104,7 +104,7 @@ class ShopifyCoffeeAgent:
         return pending
 
     def optimize_divise_content(self, title, current_body):
-        """Usa l'IA con le regole di rigore, temperatura 0.5 e formato JSON nativo."""
+        """Usa l'IA con le regole di rigore, generando lo Schema FAQ esattamente nel formato richiesto."""
         system_prompt = """Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
 
 Scrivi descrizioni per un e-commerce professionale. La voce del brand è competente, concreta, affidabile e rassicurante. Il tono è professionale ma naturale, diretto e comprensibile. Usa frasi brevi, verbi attivi e informazioni utili per aiutare il cliente nella scelta.
@@ -126,38 +126,49 @@ Non descrivere un prodotto come antibatterico, antimacchia, ignifugo, impermeabi
 
 Se un'informazione non è disponibile, omettila. Non fare supposizioni e non presentare come certe informazioni generiche normalmente associate a quel tipo di prodotto.
 
-Il Made in Italy e l'esperienza dal 2007 possono essere citati come valori aziendali generali, ma non devi affermare che il singolo prodotto sia Made in Italy se questo non è indicato nella descrizione originale.
-
-Evita:
-- superlativi inutili;
-- aggettivi accumulati;
-- frasi da catalogo o da vetrina;
-- promesse assolute;
-- affermazioni vaghe o non verificabili;
-- ripetizioni del nome del prodotto;
-- contenuti promozionali eccessivi.
-
 La descrizione HTML deve essere ordinata e leggibile e può contenere:
 - un'introduzione con <p>;
 - titoli <h2> descrittivi;
 - elenchi puntati con <ul> e <li>;
 - parole importanti in <strong>.
 
-Non utilizzare <h1>. Non inserire markdown, link, emoji, shortcode o codice JavaScript.
+Non utilizzare <h1>. Non inserire markdown, link, emoji, shortcode o codice JavaScript nel corpo HTML.
 
 REGOLE SEO:
 - seo_title: massimo 60 caratteri, chiaro e descrittivo;
 - seo_description: idealmente tra 140 e 155 caratteri, naturale e utile per il cliente;
-- non inserire parole chiave in modo artificiale;
-- non usare promesse non dimostrabili;
-- non aggiungere il brand se non è presente nelle informazioni fornite.
+- non inserire parole chiave in modo artificiale.
+
+REGOLE PER IL FAQ SCHEMA:
+Genera un array JSON con 3 o 4 domande e risposte utili per il cliente (es. su tessuti, lavaggio, utilizzo o personalizzazione), strutturate esattamente in questo formato:
+[
+  {
+    "@type": "Question",
+    "name": "Domanda...",
+    "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Risposta..."
+    }
+  }
+]
+Bassati unicamente sulle informazioni certe del prodotto.
 
 REGOLE TASSATIVE PER L'OUTPUT:
 Devi restituire esclusivamente un oggetto JSON valido con questa struttura esatta:
 {
   "seo_title": "Titolo SEO",
   "seo_description": "Descrizione SEO",
-  "body_html": "<p>Descrizione HTML...</p>"
+  "body_html": "<p>Descrizione HTML...</p>",
+  "faq_schema": [
+    {
+      "@type": "Question",
+      "name": "Domanda...",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Risposta..."
+      }
+    }
+  ]
 }"""
 
         user_prompt = f"""
@@ -170,9 +181,7 @@ Descrizione attuale:
 {current_body or "Nessuna descrizione disponibile"}
 
 Usa le informazioni disponibili nella descrizione attuale come fonte principale.
-Mantieni tutti i dati tecnici corretti già presenti, ma elimina ripetizioni, frasi generiche e formulazioni poco utili.
-
-Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senza inventare dettagli.
+Mantieni tutti i dati tecnici corretti già presenti ed elimina ripetizioni o frasi generiche.
 """
 
         try:
@@ -193,7 +202,7 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
             return None
 
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
-        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag tramite GraphQL."""
+        """Aggiorna su Shopify descrizione, SEO, tag e salva il FAQ Schema nel Metafield dedicato."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
         # 1. Recuperiamo i tag attuali
@@ -214,7 +223,7 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
         if tag_to_add not in tags_list:
             tags_list.append(tag_to_add)
 
-        # 2. Mutazione GraphQL corretta per Shopify Admin API
+        # 2. Mutazione GraphQL per aggiornare prodotto, HTML, SEO e tag
         mutation = """
         mutation productUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
@@ -250,23 +259,57 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
         
         response = requests.post(graphql_url, json={"query": mutation, "variables": variables}, headers=self.headers)
         
-        print(f"[DEBUG UPDATE] Status Code HTTP: {response.status_code}")
-        print(f"[DEBUG UPDATE] Response Body: {response.text}")
-        
         if response.status_code == 200:
             result_data = response.json()
             user_errors = result_data.get("data", {}).get("productUpdate", {}).get("userErrors", [])
             if user_errors:
-                print(f"[ERRORE GRAPHQL RESTITUITO DA SHOPIFY] {user_errors}")
+                print(f"[ERRORE GRAPHQL PRODOTTO] {user_errors}")
                 return False
             
-            # Verifichiamo se descriptionHtml è tornata valorizzata nella risposta
-            updated_product = result_data.get("data", {}).get("productUpdate", {}).get("product", {})
-            desc_html = updated_product.get('descriptionHtml')
-            print(f"[VERIFICA HTML] Descrizione salvata su Shopify: {desc_html[:60] if desc_html else 'NESSUNA DESCRIZIONE'}...")
-            
-            print(f"[SUCCESSO] Prodotto ID {product_id} aggiornato correttamente via GraphQL!")
+            # 3. Salvataggio del Metafield FAQ Schema (namespace: custom, key: faq_schema)
+            faq_obj = seo_data.get("faq_schema")
+            if faq_obj:
+                metafield_mutation = """
+                mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+                  metafieldsSet(metafields: $metafields) {
+                    metafields {
+                      id
+                      namespace
+                      key
+                      value
+                    }
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }
+                """
+                metafield_variables = {
+                    "metafields": [
+                        {
+                            "ownerId": f"gid://shopify/Product/{product_id}",
+                            "namespace": "custom",
+                            "key": "faq_schema",
+                            "type": "json",
+                            "value": json.dumps(faq_obj, ensure_ascii=False)
+                        }
+                    ]
+                }
+                
+                meta_resp = requests.post(graphql_url, json={"query": metafield_mutation, "variables": metafield_variables}, headers=self.headers)
+                if meta_resp.status_code == 200:
+                    meta_data = meta_resp.json()
+                    meta_errors = meta_data.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
+                    if meta_errors:
+                        print(f"[AVVISO METAFIELD FAQ] {meta_errors}")
+                    else:
+                        print(f"[SUCCESSO] Metafield FAQ Schema salvato correttamente per il prodotto {product_id}!")
+                else:
+                    print(f"[ERRORE HTTP METAFIELD] {meta_resp.text}")
+
+            print(f"[SUCCESSO] Prodotto ID {product_id} aggiornato completamente via GraphQL!")
             return True
         else:
-            print(f"[ERRORE HTTP] {response.text}")
+            print(f"[ERRORE HTTP PRODOTTO] {response.text}")
             return False
