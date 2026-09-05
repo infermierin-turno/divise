@@ -17,17 +17,14 @@ class ShopifyCoffeeAgent:
             "Content-Type": "application/json"
         }
         
-        # Se è disponibile un access token diretto (es. che inizia per shpat_), usiamo l'header dedicato
         if self.access_token and self.access_token.startswith("shpat_"):
             self.headers["X-Shopify-Access-Token"] = self.access_token
         elif self.client_id and self.client_secret:
-            # Autenticazione Basic con API Key (username) e Secret (password, es. eshpss_...)
             auth_string = f"{self.client_id}:{self.client_secret}"
             encoded_auth = base64.b64encode(auth_string.encode()).decode()
             self.headers["Authorization"] = f"Basic {encoded_auth}"
         elif self.access_token:
-            # Se la variabile d'ambiente dell'access token contiene direttamente il secret o una chiave mista
-            self.headers["X-Shopify-Access-Token"] su self.access_token
+            self.headers["X-Shopify-Access-Token"] = self.access_token
 
     def get_products(self, limit=20):
         """Recupera l'elenco dei prodotti dal negozio Shopify includendo tutti gli stati."""
@@ -95,7 +92,7 @@ Descrizione Attuale: {current_body}
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
         """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag."""
         get_url = f"{self.shop_url}/admin/api/2024-01/products/{product_id}.json"
-        get_resp = requests.get(get_url, headers=_{self.headers}) # correzione interna headers
+        get_resp = requests.get(get_url, headers=self.headers)
         
         current_tags_str = ""
         if get_resp.status_code == 200:
