@@ -193,7 +193,7 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
             return None
 
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
-        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag tramite GraphQL con log di debug."""
+        """Aggiorna su Shopify descrizione HTML, Meta Title, Meta Description e tag tramite GraphQL."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
         # 1. Recuperiamo i tag attuali
@@ -214,13 +214,14 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
         if tag_to_add not in tags_list:
             tags_list.append(tag_to_add)
 
-        # 2. Mutazione GraphQL
+        # 2. Mutazione GraphQL corretta per Shopify Admin API
         mutation = """
         mutation productUpdate($input: ProductInput!) {
           productUpdate(input: $input) {
             product {
               id
               title
+              descriptionHtml
               tags
               seo {
                 title
@@ -258,6 +259,12 @@ Se la descrizione attuale contiene poche informazioni, crea un testo sobrio senz
             if user_errors:
                 print(f"[ERRORE GRAPHQL RESTITUITO DA SHOPIFY] {user_errors}")
                 return False
+            
+            # Verifichiamo se descriptionHtml è tornata valorizzata nella risposta
+            updated_product = result_data.get("data", {}).get("productUpdate", {}).get("product", {})
+            desc_html = updated_product.get('descriptionHtml')
+            print(f"[VERIFICA HTML] Descrizione salvata su Shopify: {desc_html[:60] if desc_html else 'NESSUNA DESCRIZIONE'}...")
+            
             print(f"[SUCCESSO] Prodotto ID {product_id} aggiornato correttamente via GraphQL!")
             return True
         else:
