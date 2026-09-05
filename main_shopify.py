@@ -8,7 +8,6 @@ class ShopifyCoffeeAgent:
     def __init__(self, shop_url, openai_api_key, client_id=None, client_secret=None, access_token=None, **kwargs):
         self.shop_url = shop_url.rstrip('/')
         self.ai_client = OpenAI(api_key=openai_api_key)
-        
         self.client_id = client_id or os.getenv("SHOPIFY_CLIENT_ID") or os.getenv("SHOPIFY_API_KEY")
         self.access_token = access_token or os.getenv("SHOPIFY_ACCESS_TOKEN")
         
