@@ -11,7 +11,6 @@ class ShopifyCoffeeAgent:
         self.client_id = client_id or os.getenv("SHOPIFY_CLIENT_ID") or os.getenv("SHOPIFY_API_KEY")
         self.client_secret = client_secret or os.getenv("SHOPIFY_CLIENT_SECRET") or os.getenv("SHOPIFY_SECRET") or os.getenv("SHOPIFY_API_SECRET")
         
-        # Genera automaticamente il token di accesso usando le credenziali OAuth
         self.access_token = self._get_admin_access_token()
         
         self.headers = {
@@ -20,7 +19,7 @@ class ShopifyCoffeeAgent:
         }
 
     def _get_admin_access_token(self):
-        """Ottiene dinamicamente il token di accesso admin usando Client ID e Client Secret."""
+        """Ottiene dinamicamente il token di accesso tramite OAuth client_credentials."""
         if not self.client_id or not self.client_secret:
             print("[AVVISO] Client ID o Client Secret mancanti per la generazione OAuth.")
             return None
@@ -47,15 +46,17 @@ class ShopifyCoffeeAgent:
             return None
 
     def get_products(self, limit=20):
-        """Recupera l'elenco dei prodotti dal negozio Shopify."""
-        url = f"{self.shop_url}/admin/api/2024-01/products.json?limit={limit}&status=any"
+        """Recupera l'elenco dei prodotti tramite le Product Listings per i Sales Channel."""
+        url = f"{self.shop_url}/admin/api/2024-01/product_listings.json?limit={limit}"
         response = requests.get(url, headers=self.headers)
         
         print(f"[DEBUG SHOPIFY] Status Code Risposta Prodotti: {response.status_code}")
         print(f"[DEBUG SHOPIFY] Contenuto Risposta Completo: {response.text}")
         
         if response.status_code == 200:
-            return response.json().get("products", [])
+            # Le product_listings restituiscono la chiave "product_listings" anziché "products"
+            listings = response.json().get("product_listings", [])
+            return listings
         else:
             print(f"[ERRORE] Impossibile recuperare i prodotti: {response.status_code} - {response.text}")
             return []
