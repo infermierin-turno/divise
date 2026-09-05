@@ -233,7 +233,6 @@ Varianti del prodotto:
             raw_content = response.choices[0].message.content.strip()
             data = json.loads(raw_content)
             
-            # Controllo di sicurezza: se l'IA dimentica il faq_schema, lo generiamo noi di fallback basato sulle varianti
             if not data.get("faq_schema") or not isinstance(data.get("faq_schema"), list):
                 fallback_faqs = []
                 if var_list:
@@ -254,7 +253,6 @@ Varianti del prodotto:
             return None
 
     def update_product_image_alt_texts(self, product_id, product_title):
-        """Recupera le immagini del prodotto e aggiorna automaticamente il loro Alt Text per la SEO."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
         query_images = f"""
@@ -321,7 +319,6 @@ Varianti del prodotto:
         return True
 
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
-        """Aggiorna su Shopify descrizione, SEO, tag, Metafield FAQ Schema e Alt Text delle immagini."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
         
         get_query = f"""
