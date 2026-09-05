@@ -34,9 +34,9 @@ def read_root():
             "message": str(e)
         }
 
-@app.post("/optimize/{product_id}")
+@app.get("/optimize/{product_id}")
 def optimize_single_product(product_id: str):
-    """Ottimizza SEO e descrizione HTML per uno specifico prodotto tramite IA."""
+    """Ottimizza SEO e descrizione HTML per uno specifico prodotto tramite IA (tramite GET per test da browser)."""
     try:
         url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
         response = requests.get(url, headers=agent.headers)
@@ -65,9 +65,9 @@ def optimize_single_product(product_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/optimize-all")
-def optimize_all_products(limit: int = 5):
-    """Ottimizza in blocco i primi N prodotti del catalogo."""
+@app.get("/optimize-all")
+def optimize_all_products(limit: int = 1):
+    """Ottimizza in blocco i primi N prodotti del catalogo (tramite GET per test da browser)."""
     try:
         products = agent.get_products(limit=limit)
         results = []
