@@ -186,6 +186,130 @@ REGOLE CONTRO LE ALLUCINAZIONI
         }
         return json.dumps(fallback_data, ensure_ascii=False)
 
+def requests_post_safe(url, query, headers, variables=None):
+    try:
+        payload = {"query": query}
+        if variables:
+            payload["variables"] = variables
+        return requests.post(url, json=payload, headers=headers)
+    except Exception as e:
+        print(f"Errore di rete: {e}")
+        return None
+
+def bulk_add_missing_faqs_and_howto():
+    """Scansiona il catalogo Shopify e aggiunge FAQ Schema e HowTo Schema ai prodotti che ne sono sprovvisti."""
+    graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
+    updated_count = 0
+    has_next_page = True
+    end_cursor = None
+
+    while has_next_page:
+        query = """
+        query getProducts($cursor: String) {
+          products(first: 250, after: $cursor) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              node {
+                id
+                title
+                descriptionHtml
+                variants(first: 20) {
+                  edges {
+                    node {
+                      title
+                    }
+                  }
+                }
+                faqMetafield: metafield(namespace: "custom", key: "faq_schema") {
+                  id
+                }
+                howtoMetafield: metafield(namespace: "custom", key: "howto_data") {
+                  id
+                }
+              }
+            }
+          }
+        }
+        """
+        variables = {"cursor": end_cursor}
+        response = requests_post_safe(graphql_url, query, agent.headers, variables=variables)
+        
+        if not response or response.status_code != 200:
+            raise Exception("Impossibile recuperare l'elenco dei prodotti da Shopify.")
+
+        data = response.json().get("data", {}).get("products", {})
+        page_info = data.get("pageInfo", {})
+        has_next_page = page_info.get("hasNextPage", False)
+        end_cursor = page_info.get("endCursor")
+
+        edges = data.get("edges", [])
+
+        for edge in edges:
+            node = edge.get("node", {})
+            raw_id = node.get("id", "")
+            title = node.get("title", "Prodotto")
+            body_html = node.get("descriptionHtml", "")
+            
+            has_faq = node.get("faqMetafield") is not None
+            has_howto = node.get("howtoMetafield") is not None
+
+            metafields_to_set = []
+
+            if not has_faq:
+                variants_list = []
+                for v_edge in node.get("variants", {}).get("edges", []):
+                    variants_list.append(v_edge.get("node", {}))
+                faq_obj = generate_complete_faq(title, variants_list, body_html)
+                metafields_to_set.append({
+                    "ownerId": raw_id,
+                    "namespace": "custom",
+                    "key": "faq_schema",
+                    "type": "json",
+                    "value": json.dumps(faq_obj, ensure_ascii=False)
+                })
+
+            if not has_howto:
+                howto_json = generate_howto_json(title, body_html)
+                metafields_to_set.append({
+                    "ownerId": raw_id,
+                    "namespace": "custom",
+                    "key": "howto_data",
+                    "type": "json",
+                    "value": howto_json
+                })
+
+            if metafields_to_set:
+                metafield_mutation = """
+                mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+                  metafieldsSet(metafields: $metafields) {
+                    metafields {
+                      id
+                      namespace
+                      key
+                    }
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }
+                """
+                meta_resp = requests.post(
+                    graphql_url, 
+                    json={"query": metafield_mutation, "variables": {"metafields": metafields_to_set}}, 
+                    headers=agent.headers
+                )
+                if meta_resp.status_code == 200:
+                    meta_data = meta_resp.json()
+                    meta_errors = meta_data.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
+                    if not meta_errors:
+                        updated_count += 1
+
+    return updated_count
+
 @app.get("/run-bulk-faqs")
 def trigger_bulk_faqs(key: str = ""):
     """Endpoint protetto per avviare l'aggiornamento massivo di FAQ e HowTo sui prodotti mancanti."""
