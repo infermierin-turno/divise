@@ -188,28 +188,65 @@ def requests_post_safe(url, query, headers, variables=None):
 
 def find_related_product_ids(current_product_title: str, all_products: list, current_product_id: str, max_items: int = 3) -> list:
     related_gids = []
-    keywords = [w.lower() for w in current_product_title.split() if len(w) > 3]
+    title_lower = current_product_title.lower()
     
+    # Riconoscimento categoria principale e controparte complementare
+    target_complement = None
+    if "casacca" in title_lower or "giacca" in title_lower or "camice" in title_lower:
+        if "infermiere" in title_lower or "sanitari" in title_lower or "medico" in title_lower or "oss" in title_lower:
+            target_complement = "pantalone"
+        elif "cuoco" in title_lower or "chef" in title_lower or "ristorazione" in title_lower:
+            target_complement = "pantalone"
+        elif "estetista" in title_lower or "parrucchiera" in title_lower:
+            target_complement = "pantalone"
+    elif "pantalone" in title_lower:
+        if "infermiere" in title_lower or "sanitari" in title_lower:
+            target_complement = "casacca"
+        elif "cuoco" in title_lower or "chef" in title_lower:
+            target_complement = "giacca"
+
+    # 1. Cerca prima un complemento ideale (es. Casacca -> Pantalone)
+    if target_complement:
+        for p in all_products:
+            pid = p.get("id")
+            ptitle = p.get("title", "").lower()
+            if pid == current_product_id:
+                continue
+            # Verifica che contenga il complemento e possibilmente lo stesso ambito (es. infermiere)
+            if target_complement in ptitle:
+                # Controlla affinità di settore se possibile
+                if any(sec in title_lower and sec in ptitle for sec in ["infermiere", "bianca", "cuoco", "chef", "estetista", "sanitari"]):
+                    if pid not in related_gids:
+                        related_gids.append(pid)
+                        break
+                elif not related_gids:
+                    if pid not in related_gids:
+                        related_gids.append(pid)
+                        break
+
+    # 2. Riempie i posti rimanenti con parole chiave simili nel titolo
+    keywords = [w.lower() for w in current_product_title.split() if len(w) > 3]
     for p in all_products:
+        if len(related_gids) >= max_items:
+            break
         pid = p.get("id")
         ptitle = p.get("title", "")
-        if pid == current_product_id:
+        if pid == current_product_id or pid in related_gids:
             continue
         
         match_score = sum(1 for kw in keywords if kw in ptitle.lower())
         if match_score > 0:
             related_gids.append(pid)
-            if len(related_gids) >= max_items:
-                break
                 
+    # 3. Se ancora non bastano, prende prodotti generici del catalogo
     if len(related_gids) < max_items:
         for p in all_products:
+            if len(related_gids) >= max_items:
+                break
             pid = p.get("id")
             if pid == current_product_id or pid in related_gids:
                 continue
             related_gids.append(pid)
-            if len(related_gids) >= max_items:
-                break
                 
     return related_gids
 
@@ -324,12 +361,30 @@ def bulk_add_missing_faqs_howto_and_related():
             if not has_related and all_catalog_products:
                 related_ids = find_related_product_ids(title, all_catalog_products, raw_id, max_items=3)
                 if related_ids:
+                    json_related_val = json.dumps(related_ids)
+                    # 1. Custom related products
                     metafields_to_set.append({
                         "ownerId": raw_id,
                         "namespace": "custom",
                         "key": "related_products",
                         "type": "list.product_reference",
-                        "value": json.dumps(related_ids)
+                        "value": json_related_val
+                    })
+                    # 2. Shopify Discovery - Complementary products
+                    metafields_to_set.append({
+                        "ownerId": raw_id,
+                        "namespace": "shopify--discovery--product_recommendation",
+                        "key": "complementary_products",
+                        "type": "list.product_reference",
+                        "value": json_related_val
+                    })
+                    # 3. Shopify Discovery - Related products
+                    metafields_to_set.append({
+                        "ownerId": raw_id,
+                        "namespace": "shopify--discovery--product_recommendation",
+                        "key": "related_products",
+                        "type": "list.product_reference",
+                        "value": json_related_val
                     })
 
             if metafields_to_set:
@@ -635,7 +690,7 @@ def apply_product_optimization(product_id: str):
                 <div class="max-w-xl mx-auto p-12 text-center mt-12 bg-white rounded-2xl shadow-md border">
                     <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">&#10003;</div>
                     <h1 class="text-2xl font-bold text-gray-800 mb-2">Aggiornato con Successo!</h1>
-                    <p class="text-gray-600 mb-6">Key corretta: ora scrive su <strong>custom.howto_schema</strong>.</p>
+                    <p class="text-gray-600 mb-6">Ottimizzazione applicata con successo al singolo prodotto.</p>
                     <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-lg shadow transition">
                         Torna alla Home &rarr;
                     </a>
