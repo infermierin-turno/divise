@@ -3,6 +3,7 @@ import json
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from openai import OpenAI
 from shopify_agent import ShopifyCoffeeAgent
 
 app = FastAPI(title="Shopify Divise SEO & AI Agent")
@@ -11,6 +12,9 @@ shop_url = os.getenv("SHOP_URL") or "https://1a6ed6.myshopify.com"
 openai_api_key = os.getenv("OPENAI_API_KEY")
 client_id = os.getenv("SHOPIFY_CLIENT_ID")
 client_secret = os.getenv("SHOPIFY_CLIENT_SECRET")
+
+# Inizializzazione client OpenAI
+client_openai = OpenAI(api_key=openai_api_key)
 
 agent = ShopifyCoffeeAgent(
     shop_url=shop_url,
@@ -63,6 +67,45 @@ def generate_complete_faq(product_title, variants, body_html=""):
     ]
     return faq_list
 
+def generate_howto_json(product_title: str, product_description: str) -> str:
+    """Genera tramite OpenAI una guida pratica (HowTo) strutturata in JSON valida per il metafield custom.howto_data."""
+    prompt = f"""
+    Sei un esperto di e-commerce e SEO per abbigliamento professionale e sanitario.
+    Genera una guida pratica (HowTo) in formato JSON strettamente valido per il seguente prodotto:
+    Prodotto: {product_title}
+    Descrizione: {product_description}
+
+    Il JSON deve avere questa struttura esatta, senza markdown attorno (restituisci SOLO il JSON puro):
+    {{
+      "title": "Come indossare e mantenere al meglio {product_title}",
+      "description": "Guida pratica per la cura e la manutenzione di questo capo professionale.",
+      "steps": [
+        {{
+          "name": "Scelta della taglia e vestibilità",
+          "text": "Verifica le misure corporali con la nostra tabella taglie per assicurare il massimo comfort durante i turni lavorativi."
+        }},
+        {{
+          "name": "Lavaggio e igienizzazione",
+          "text": "Segui le temperature consigliate sull'etichetta interna per preservare i trattamenti antibatterici e la resistenza dei tessuti."
+        }}
+      ]
+    }}
+    """
+    
+    response = client_openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3
+    )
+    
+    content = response.choices[0].message.content.strip()
+    if content.startswith("```json"):
+        content = content[7:-3].strip()
+    elif content.startswith("```"):
+        content = content[3:-3].strip()
+        
+    return content
+
 def requests_post_safe(url, query, headers, variables=None):
     try:
         payload = {"query": query}
@@ -73,7 +116,7 @@ def requests_post_safe(url, query, headers, variables=None):
         print(f"Errore di rete: {e}")
         return None
 
-def bulk_add_missing_faqs():
+def bulk_add_missing_faqs_and_howto():
     graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
     updated_count = 0
     has_next_page = True
@@ -99,7 +142,10 @@ def bulk_add_missing_faqs():
                     }
                   }
                 }
-                metafield(namespace: "custom", key: "faq_schema") {
+                faqMetafield: metafield(namespace: "custom", key: "faq_schema") {
+                  id
+                }
+                howtoMetafield: metafield(namespace: "custom", key: "howto_data") {
                   id
                 }
               }
@@ -126,64 +172,74 @@ def bulk_add_missing_faqs():
             product_id = raw_id.split("/")[-1] if raw_id else ""
             title = node.get("title", "Prodotto")
             body_html = node.get("descriptionHtml", "")
-            has_faq_metafield = node.get("metafield") is not None
+            
+            has_faq = node.get("faqMetafield") is not None
+            has_howto = node.get("howtoMetafield") is not None
 
-            if has_faq_metafield:
-                continue
+            metafields_to_set = []
 
-            variants_list = []
-            for v_edge in node.get("variants", {}).get("edges", []):
-                variants_list.append(v_edge.get("node", {}))
+            if not has_faq:
+                variants_list = []
+                for v_edge in node.get("variants", {}).get("edges", []):
+                    variants_list.append(v_edge.get("node", {}))
+                faq_obj = generate_complete_faq(title, variants_list, body_html)
+                metafields_to_set.append({
+                    "ownerId": raw_id,
+                    "namespace": "custom",
+                    "key": "faq_schema",
+                    "type": "json",
+                    "value": json.dumps(faq_obj, ensure_ascii=False)
+                })
 
-            faq_obj = generate_complete_faq(title, variants_list, body_html)
+            if not has_howto:
+                howto_json = generate_howto_json(title, body_html)
+                metafields_to_set.append({
+                    "ownerId": raw_id,
+                    "namespace": "custom",
+                    "key": "howto_data",
+                    "type": "json",
+                    "value": howto_json
+                })
 
-            metafield_mutation = """
-            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-              metafieldsSet(metafields: $metafields) {
-                metafields {
-                  id
-                  namespace
-                  key
-                  value
-                }
-                userErrors {
-                  field
-                  message
-                }
-              }
-            }
-            """
-            metafield_variables = {
-                "metafields": [
-                    {
-                        "ownerId": f"gid://shopify/Product/{product_id}",
-                        "namespace": "custom",
-                        "key": "faq_schema",
-                        "type": "json",
-                        "value": json.dumps(faq_obj, ensure_ascii=False)
+            if metafields_to_set:
+                metafield_mutation = """
+                mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+                  metafieldsSet(metafields: $metafields) {
+                    metafields {
+                      id
+                      namespace
+                      key
                     }
-                ]
-            }
-
-            meta_resp = requests.post(graphql_url, json={"query": metafield_mutation, "variables": metafield_variables}, headers=agent.headers)
-            if meta_resp.status_code == 200:
-                meta_data = meta_resp.json()
-                meta_errors = meta_data.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
-                if not meta_errors:
-                    updated_count += 1
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }
+                """
+                meta_resp = requests.post(
+                    graphql_url, 
+                    json={"query": metafield_mutation, "variables": {"metafields": metafields_to_set}}, 
+                    headers=agent.headers
+                )
+                if meta_resp.status_code == 200:
+                    meta_data = meta_resp.json()
+                    meta_errors = meta_data.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
+                    if not meta_errors:
+                        updated_count += 1
 
     return updated_count
 
 @app.get("/run-bulk-faqs")
 def trigger_bulk_faqs(key: str = ""):
-    """Endpoint protetto per avviare l'aggiornamento massivo delle FAQ sui prodotti mancanti."""
+    """Endpoint protetto per avviare l'aggiornamento massivo di FAQ e HowTo sui prodotti mancanti."""
     secret_key = os.getenv("BULK_SECRET_KEY", "unasegretafacile")
     if key != secret_key:
         raise HTTPException(status_code=403, detail="Non autorizzato: chiave errata o mancante.")
 
     try:
-        count = bulk_add_missing_faqs()
-        return {"status": "success", "message": f"Aggiornamento massivo completato. Aggiunti FAQ Schema a {count} prodotti in tutto il catalogo."}
+        count = bulk_add_missing_faqs_and_howto()
+        return {"status": "success", "message": f"Aggiornamento massivo completato. Metafield FAQ e HowTo aggiunti a {count} prodotti in tutto il catalogo."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -225,10 +281,10 @@ def read_root():
                     </form>
                 </div>
 
-                <!-- SEZIONE 2: AGGIORNAMENTO MASSIVO FAQ -->
+                <!-- SEZIONE 2: AGGIORNAMENTO MASSIVO FAQ & HOWTO -->
                 <div class="mb-8 p-5 bg-purple-50/50 rounded-xl border border-purple-100">
-                    <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ Schema (Completo)</h3>
-                    <p class="text-xs text-gray-500 mb-3">Scansiona tutto il catalogo e aggiunge le FAQ strutturate a tutti i prodotti rimanenti.</p>
+                    <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ & HowTo Schema</h3>
+                    <p class="text-xs text-gray-500 mb-3">Scansiona tutto il catalogo e aggiunge FAQ e HowTo strutturate a tutti i prodotti rimanenti.</p>
                     <a href="/run-bulk-faqs?key=unasegretafacile" target="_blank" class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition shadow">
                         Esegui Aggiornamento Massivo Totale &rarr;
                     </a>
@@ -409,6 +465,31 @@ def apply_product_optimization(product_id: str):
         
         success = agent.update_product_seo_and_description(product_id, seo_data, tag_to_add="Ottimizzato IA")
         if success:
+            # Genera e imposta anche il metafield HowTo contestualmente all'approvazione puntuale
+            howto_json = generate_howto_json(title, current_body)
+            graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
+            metafield_mutation = """
+            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) {
+                metafields { id }
+                userErrors { field message }
+              }
+            }
+            """
+            requests.post(
+                graphql_url,
+                json={"query": metafield_mutation, "variables": {
+                    "metafields": [{
+                        "ownerId": f"gid://shopify/Product/{product_id}",
+                        "namespace": "custom",
+                        "key": "howto_data",
+                        "type": "json",
+                        "value": howto_json
+                    }]
+                }},
+                headers=agent.headers
+            )
+
             html_content = f"""
             <!DOCTYPE html>
             <html lang="it">
