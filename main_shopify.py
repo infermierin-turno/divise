@@ -191,46 +191,13 @@ def find_related_product_ids(current_product_title: str, all_products: list, cur
     related_gids = []
     title_lower = current_product_title.lower()
     
-    # Rilevamento del settore e del tipo di abbinamento rigoroso
-    target_complement = None
-    required_sector_tag = None
+    # 1. Riconoscimento del Macro-Settore (Recinto)
+    is_school = any(w in title_lower for w in ["grembiule", "grembiulino", "scuola", "scolastico", "asilo", "remigino"])
+    is_sanitary = any(w in title_lower for w in ["medico", "sanitari", "sanitario", "infermiere", "oss", "dottore", "dentista", "ospedale", "camice", "casacca bianca"])
+    is_horeca = any(w in title_lower for w in ["cuoco", "chef", "cameriere", "sala", "ristorazione", "cucina", "gilet", "grebiule cucina", "cravatta"])
+    is_beauty = any(w in title_lower for w in ["estetista", "parrucchiera", "centro benessere", "spa", "estetica"])
 
-    if "camice" in title_lower or "casacca" in title_lower or "giacca" in title_lower:
-        if any(w in title_lower for w in ["medico", "sanitari", "infermiere", "oss", "dottore", "dentista", "ospedale"]):
-            target_complement = "pantalone"
-            required_sector_tag = "sanitari"
-        elif any(w in title_lower for w in ["cuoco", "chef", "ristorazione", "cucina"]):
-            target_complement = "pantalone"
-            required_sector_tag = "cuoco"
-        elif any(w in title_lower for w in ["estetista", "parrucchiera", "centro benessere", "spa"]):
-            target_complement = "pantalone"
-            required_sector_tag = "estetista"
-    elif "pantalone" in title_lower:
-        if any(w in title_lower for w in ["sanitari", "medico", "infermiere", "oss"]):
-            target_complement = "casacca"
-            required_sector_tag = "sanitari"
-        elif any(w in title_lower for w in ["cuoco", "chef"]):
-            target_complement = "giacca"
-            required_sector_tag = "cuoco"
-
-    # 1. Cerca prima un complemento strettamente coerente per settore
-    if target_complement and required_sector_tag:
-        for p in all_products:
-            pid = p.get("id")
-            ptitle = p.get("title", "").lower()
-            if pid == current_product_id:
-                continue
-            # Verifica che il prodotto candidato contenga sia il complemento (es. pantalone) sia lo stesso settore (es. sanitari)
-            if target_complement in ptitle and required_sector_tag in ptitle:
-                if pid not in related_gids:
-                    related_gids.append(pid)
-                    if len(related_gids) >= max_items:
-                        break
-
-    # 2. Se mancano elementi, cerca prodotti con parole chiave in comune ma escludendo categorie totalmente estranee (es. reception)
-    keywords = [w.lower() for w in current_product_title.split() if len(w) > 3]
-    forbidden_terms = ["reception", "cravatta", "grembiule", "cErtificato"] # evita incroci errati
-
+    # 2. Definizione delle Blacklist automatiche incrociate
     for p in all_products:
         if len(related_gids) >= max_items:
             break
@@ -238,14 +205,32 @@ def find_related_product_ids(current_product_title: str, all_products: list, cur
         ptitle = p.get("title", "").lower()
         if pid == current_product_id or pid in related_gids:
             continue
-        if any(ft in ptitle for ft in forbidden_terms):
+
+        # Regola recinto SCUOLA: pesca SOLO prodotti scolastici
+        if is_school:
+            if any(w in ptitle for w in ["grembiule", "grembiulino", "scuola", "asilo", "remigino"]):
+                related_gids.append(pid)
             continue
-        
+
+        # Se il prodotto corrente NON è scolastico, vieta rigorosamente che finisca un articolo scolastico tra i correlati
+        if any(w in ptitle for w in ["grembiulino", "scuola", "asilo", "remigino"]):
+            continue
+
+        # Regola recinto SANITARIO: vieta Ho.Re.Ca. spinto (cameriere, gilet, cuoco)
+        if is_sanitary and any(term in ptitle for term in ["cameriere", "gilet", "cuoco", "chef", "cravatta"]):
+            continue
+
+        # Regola recinto HORECA: vieta camici medici o sanitari ospedalieri
+        if is_horeca and any(term in ptitle for term in ["medico", "infermiere", "ospedale", "sanitari", "oss"]):
+            continue
+
+        # Criterio di affinità per parole chiave generali se passa i filtri di recinto
+        keywords = [w.lower() for w in current_product_title.split() if len(w) > 3]
         match_score = sum(1 for kw in keywords if kw in ptitle)
         if match_score > 0:
             related_gids.append(pid)
-                
-    # 3. Riempimento di sicurezza finale se ancora vuoto
+
+    # 3. Riempimento di sicurezza finale (se servono elementi e non abbiamo sforato i recinti)
     if len(related_gids) < max_items:
         for p in all_products:
             if len(related_gids) >= max_items:
@@ -254,10 +239,19 @@ def find_related_product_ids(current_product_title: str, all_products: list, cur
             ptitle = p.get("title", "").lower()
             if pid == current_product_id or pid in related_gids:
                 continue
-            if any(ft in ptitle for ft in forbidden_terms):
+            
+            # Applicazione filtri di sicurezza anche nel fallback
+            if is_school and not any(w in ptitle for w in ["grembiule", "grembiulino", "scuola", "asilo"]):
                 continue
+            if not is_school and any(w in ptitle for w in ["grembiulino", "scuola", "asilo"]):
+                continue
+            if is_sanitary and any(term in ptitle for term in ["cameriere", "gilet", "cuoco", "chef"]):
+                continue
+            if is_horeca and any(term in ptitle for term in ["medico", "infermiere", "ospedale", "sanitari"]):
+                continue
+
             related_gids.append(pid)
-                
+
     return related_gids
 
 def bulk_add_missing_faqs_howto_and_related():
