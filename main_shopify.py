@@ -13,7 +13,6 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 client_id = os.getenv("SHOPIFY_CLIENT_ID")
 client_secret = os.getenv("SHOPIFY_CLIENT_SECRET")
 
-# Inizializzazione client OpenAI
 client_openai = OpenAI(api_key=openai_api_key)
 
 agent = ShopifyCoffeeAgent(
@@ -24,7 +23,6 @@ agent = ShopifyCoffeeAgent(
 )
 
 def generate_complete_faq(product_title, variants, body_html=""):
-    """Genera un blocco FAQ Schema completo (4 domande professionali) basato su titolo, varianti e descrizione."""
     variants_text = ", ".join([v.get("title", "") for v in variants if v.get("title")]) if variants else "Diverse opzioni disponibili"
     
     clean_body_snippet = "progettato per garantire il massimo comfort e praticità in ambito lavorativo."
@@ -68,8 +66,6 @@ def generate_complete_faq(product_title, variants, body_html=""):
     return faq_list
 
 def generate_howto_json(product_title: str, product_description: str) -> str:
-    """Genera tramite OpenAI una guida pratica (HowTo) strutturata in JSON con garanzia di schema rigido (Structured Outputs)."""
-    
     prompt = f"""
 Sei un esperto di e-commerce, contenuti SEO e abbigliamento professionale per i settori sanitario, Ho.Re.Ca., estetica, ristorazione e lavoro.
 
@@ -190,13 +186,58 @@ def requests_post_safe(url, query, headers, variables=None):
         print(f"Errore di rete: {e}")
         return None
 
-def bulk_add_missing_faqs_and_howto():
-    """Scansiona il catalogo Shopify e aggiunge FAQ Schema e HowTo Schema ai prodotti che ne sono sprovvisti (con limite batch sicuro per Render)."""
+def find_related_product_ids(current_product_title: str, all_products: list, current_product_id: str, max_items: int = 3) -> list:
+    related_gids = []
+    keywords = [w.lower() for w in current_product_title.split() if len(w) > 3]
+    
+    for p in all_products:
+        pid = p.get("id")
+        ptitle = p.get("title", "")
+        if pid == current_product_id:
+            continue
+        
+        match_score = sum(1 for kw in keywords if kw in ptitle.lower())
+        if match_score > 0:
+            related_gids.append(pid)
+            if len(related_gids) >= max_items:
+                break
+                
+    if len(related_gids) < max_items:
+        for p in all_products:
+            pid = p.get("id")
+            if pid == current_product_id or pid in related_gids:
+                continue
+            related_gids.append(pid)
+            if len(related_gids) >= max_items:
+                break
+                
+    return related_gids
+
+def bulk_add_missing_faqs_howto_and_related():
     graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
     updated_count = 0
+    updated_sample = []
     has_next_page = True
     end_cursor = None
-    batch_limit = 50  # Limite per evitare timeout su Render
+    batch_limit = 50
+
+    ref_query = """
+    query {
+      products(first: 100) {
+        edges {
+          node {
+            id
+            title
+          }
+        }
+      }
+    }
+    """
+    ref_resp = requests_post_safe(graphql_url, ref_query, agent.headers)
+    all_catalog_products = []
+    if ref_resp and ref_resp.status_code == 200:
+        edges_ref = ref_resp.json().get("data", {}).get("products", {}).get("edges", [])
+        all_catalog_products = [{"id": e.get("node", {}).get("id"), "title": e.get("node", {}).get("title")} for e in edges_ref]
 
     while has_next_page and updated_count < batch_limit:
         query = """
@@ -222,6 +263,9 @@ def bulk_add_missing_faqs_and_howto():
                   id
                 }
                 howtoMetafield: metafield(namespace: "custom", key: "howto_data") {
+                  id
+                }
+                relatedMetafield: metafield(namespace: "custom", key: "related_products") {
                   id
                 }
               }
@@ -250,6 +294,7 @@ def bulk_add_missing_faqs_and_howto():
             
             has_faq = node.get("faqMetafield") is not None
             has_howto = node.get("howtoMetafield") is not None
+            has_related = node.get("relatedMetafield") is not None
 
             metafields_to_set = []
 
@@ -275,6 +320,17 @@ def bulk_add_missing_faqs_and_howto():
                     "type": "json",
                     "value": howto_json
                 })
+
+            if not has_related and all_catalog_products:
+                related_ids = find_related_product_ids(title, all_catalog_products, raw_id, max_items=3)
+                if related_ids:
+                    metafields_to_set.append({
+                        "ownerId": raw_id,
+                        "namespace": "custom",
+                        "key": "related_products",
+                        "type": "list.product_reference",
+                        "value": json.dumps(related_ids)
+                    })
 
             if metafields_to_set:
                 metafield_mutation = """
@@ -302,8 +358,10 @@ def bulk_add_missing_faqs_and_howto():
                     meta_errors = meta_data.get("data", {}).get("metafieldsSet", {}).get("userErrors", [])
                     if not meta_errors:
                         updated_count += 1
+                        if len(updated_sample) < 5:
+                            updated_sample.append({"id": raw_id, "title": title})
 
-    return updated_count
+    return {"count": updated_count, "sample": updated_sample}
 
 @app.get("/run-bulk-faqs")
 def trigger_bulk_faqs(key: str = ""):
@@ -312,8 +370,14 @@ def trigger_bulk_faqs(key: str = ""):
         raise HTTPException(status_code=403, detail="Non autorizzato: chiave errata o mancante.")
 
     try:
-        count = bulk_add_missing_faqs_and_howto()
-        return {"status": "success", "message": f"Aggiornamento massivo parziale completato. Metafield FAQ e HowTo aggiunti a {count} prodotti in questo batch."}
+        result = bulk_add_missing_faqs_howto_and_related()
+        count = result["count"]
+        sample = result["sample"]
+        return {
+            "status": "success", 
+            "message": f"Aggiornamento massivo completato. Metafield aggiunti a {count} prodotti in questo batch.",
+            "sample_updated_products": sample
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -339,7 +403,7 @@ def read_root():
 
             <div class="bg-white rounded-xl shadow-md p-6 mb-6">
                 <h2 class="text-xl font-semibold mb-4">Pannello di Controllo</h2>
-                <p class="text-gray-600 mb-6">Scegli come procedere con l'ottimizzazione SEO dei prodotti:</p>
+                <p class="text-gray-600 mb-6">Scegli come procedere con l'ottimizzazione SEO e dei Prodotti Correlati:</p>
                 
                 <div class="mb-8 p-5 bg-blue-50/50 rounded-xl border border-blue-100">
                     <h3 class="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">1. Cerca e aggiorna un prodotto specifico</h3>
@@ -354,8 +418,8 @@ def read_root():
                 </div>
 
                 <div class="mb-8 p-5 bg-purple-50/50 rounded-xl border border-purple-100">
-                    <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ & HowTo Schema</h3>
-                    <p class="text-xs text-gray-500 mb-3">Esegue l'aggiornamento sicuro in batch (fino a 50 prodotti per esecuzione) per evitare timeout.</p>
+                    <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ, HowTo & Prodotti Correlati</h3>
+                    <p class="text-xs text-gray-500 mb-3">Esegue l'aggiornamento sicuro in batch (fino a 50 prodotti per esecuzione) mostrando i campioni aggiornati.</p>
                     <a href="/run-bulk-faqs?key=unasegretafacile" target="_blank" class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition shadow">
                         Esegui Batch Aggiornamento Massivo &rarr;
                     </a>
