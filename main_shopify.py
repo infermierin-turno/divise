@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from openai import OpenAI
@@ -190,7 +191,6 @@ def find_related_product_ids(current_product_title: str, all_products: list, cur
     related_gids = []
     title_lower = current_product_title.lower()
     
-    # Riconoscimento categoria principale e controparte complementare
     target_complement = None
     if "casacca" in title_lower or "giacca" in title_lower or "camice" in title_lower:
         if "infermiere" in title_lower or "sanitari" in title_lower or "medico" in title_lower or "oss" in title_lower:
@@ -205,16 +205,13 @@ def find_related_product_ids(current_product_title: str, all_products: list, cur
         elif "cuoco" in title_lower or "chef" in title_lower:
             target_complement = "giacca"
 
-    # 1. Cerca prima un complemento ideale (es. Casacca -> Pantalone)
     if target_complement:
         for p in all_products:
             pid = p.get("id")
             ptitle = p.get("title", "").lower()
             if pid == current_product_id:
                 continue
-            # Verifica che contenga il complemento e possibilmente lo stesso ambito (es. infermiere)
             if target_complement in ptitle:
-                # Controlla affinità di settore se possibile
                 if any(sec in title_lower and sec in ptitle for sec in ["infermiere", "bianca", "cuoco", "chef", "estetista", "sanitari"]):
                     if pid not in related_gids:
                         related_gids.append(pid)
@@ -224,7 +221,6 @@ def find_related_product_ids(current_product_title: str, all_products: list, cur
                         related_gids.append(pid)
                         break
 
-    # 2. Riempie i posti rimanenti con parole chiave simili nel titolo
     keywords = [w.lower() for w in current_product_title.split() if len(w) > 3]
     for p in all_products:
         if len(related_gids) >= max_items:
@@ -238,7 +234,6 @@ def find_related_product_ids(current_product_title: str, all_products: list, cur
         if match_score > 0:
             related_gids.append(pid)
                 
-    # 3. Se ancora non bastano, prende prodotti generici del catalogo
     if len(related_gids) < max_items:
         for p in all_products:
             if len(related_gids) >= max_items:
@@ -256,7 +251,7 @@ def bulk_add_missing_faqs_howto_and_related():
     updated_sample = []
     has_next_page = True
     end_cursor = None
-    batch_limit = 50
+    batch_limit = 25  # Ridotto a 25 per massima sicurezza su Render
 
     ref_query = """
     query {
@@ -279,7 +274,7 @@ def bulk_add_missing_faqs_howto_and_related():
     while has_next_page and updated_count < batch_limit:
         query = """
         query getProducts($cursor: String) {
-          products(first: 50, after: $cursor) {
+          products(first: 25, after: $cursor) {
             pageInfo {
               hasNextPage
               endCursor
@@ -362,7 +357,6 @@ def bulk_add_missing_faqs_howto_and_related():
                 related_ids = find_related_product_ids(title, all_catalog_products, raw_id, max_items=3)
                 if related_ids:
                     json_related_val = json.dumps(related_ids)
-                    # 1. Custom related products
                     metafields_to_set.append({
                         "ownerId": raw_id,
                         "namespace": "custom",
@@ -370,7 +364,6 @@ def bulk_add_missing_faqs_howto_and_related():
                         "type": "list.product_reference",
                         "value": json_related_val
                     })
-                    # 2. Shopify Discovery - Complementary products
                     metafields_to_set.append({
                         "ownerId": raw_id,
                         "namespace": "shopify--discovery--product_recommendation",
@@ -378,7 +371,6 @@ def bulk_add_missing_faqs_howto_and_related():
                         "type": "list.product_reference",
                         "value": json_related_val
                     })
-                    # 3. Shopify Discovery - Related products
                     metafields_to_set.append({
                         "ownerId": raw_id,
                         "namespace": "shopify--discovery--product_recommendation",
@@ -474,7 +466,7 @@ def read_root():
 
                 <div class="mb-8 p-5 bg-purple-50/50 rounded-xl border border-purple-100">
                     <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ, HowTo & Prodotti Correlati</h3>
-                    <p class="text-xs text-gray-500 mb-3">Esegue l'aggiornamento sicuro in batch (fino a 50 prodotti per esecuzione) mostrando i campioni aggiornati.</p>
+                    <p class="text-xs text-gray-500 mb-3">Esegue l'aggiornamento sicuro in batch da 25 prodotti per esecuzione.</p>
                     <a href="/run-bulk-faqs?key=unasegretafacile" target="_blank" class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition shadow">
                         Esegui Batch Aggiornamento Massivo &rarr;
                     </a>
@@ -703,3 +695,6 @@ def apply_product_optimization(product_id: str):
             raise HTTPException(status_code=500, detail="Errore durante l'aggiornamento su Shopify.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=False)
