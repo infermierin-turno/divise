@@ -262,7 +262,7 @@ def bulk_add_missing_faqs_howto_and_related():
                 faqMetafield: metafield(namespace: "custom", key: "faq_schema") {
                   id
                 }
-                howtoMetafield: metafield(namespace: "custom", key: "howto_data") {
+                howtoMetafield: metafield(namespace: "custom", key: "howto_schema") {
                   id
                 }
                 relatedMetafield: metafield(namespace: "custom", key: "related_products") {
@@ -316,7 +316,7 @@ def bulk_add_missing_faqs_howto_and_related():
                 metafields_to_set.append({
                     "ownerId": raw_id,
                     "namespace": "custom",
-                    "key": "howto_data",
+                    "key": "howto_schema",
                     "type": "json",
                     "value": howto_json
                 })
@@ -615,7 +615,7 @@ def apply_product_optimization(product_id: str):
                     "metafields": [{
                         "ownerId": f"gid://shopify/Product/{product_id}",
                         "namespace": "custom",
-                        "key": "howto_data",
+                        "key": "howto_schema",
                         "type": "json",
                         "value": howto_json
                     }]
@@ -635,7 +635,7 @@ def apply_product_optimization(product_id: str):
                 <div class="max-w-xl mx-auto p-12 text-center mt-12 bg-white rounded-2xl shadow-md border">
                     <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">&#10003;</div>
                     <h1 class="text-2xl font-bold text-gray-800 mb-2">Aggiornato con Successo!</h1>
-                    <p class="text-gray-600 mb-6">Il prodotto <strong>{title}</strong> è stato aggiornato su Shopify.</p>
+                    <p class="text-gray-600 mb-6">Key corretta: ora scrive su <strong>custom.howto_schema</strong>.</p>
                     <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-lg shadow transition">
                         Torna alla Home &rarr;
                     </a>
