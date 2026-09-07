@@ -191,55 +191,70 @@ def find_related_product_ids(current_product_title: str, all_products: list, cur
     related_gids = []
     title_lower = current_product_title.lower()
     
+    # Rilevamento del settore e del tipo di abbinamento rigoroso
     target_complement = None
-    if "casacca" in title_lower or "giacca" in title_lower or "camice" in title_lower:
-        if "infermiere" in title_lower or "sanitari" in title_lower or "medico" in title_lower or "oss" in title_lower:
-            target_complement = "pantalone"
-        elif "cuoco" in title_lower or "chef" in title_lower or "ristorazione" in title_lower:
-            target_complement = "pantalone"
-        elif "estetista" in title_lower or "parrucchiera" in title_lower:
-            target_complement = "pantalone"
-    elif "pantalone" in title_lower:
-        if "infermiere" in title_lower or "sanitari" in title_lower:
-            target_complement = "casacca"
-        elif "cuoco" in title_lower or "chef" in title_lower:
-            target_complement = "giacca"
+    required_sector_tag = None
 
-    if target_complement:
+    if "camice" in title_lower or "casacca" in title_lower or "giacca" in title_lower:
+        if any(w in title_lower for w in ["medico", "sanitari", "infermiere", "oss", "dottore", "dentista", "ospedale"]):
+            target_complement = "pantalone"
+            required_sector_tag = "sanitari"
+        elif any(w in title_lower for w in ["cuoco", "chef", "ristorazione", "cucina"]):
+            target_complement = "pantalone"
+            required_sector_tag = "cuoco"
+        elif any(w in title_lower for w in ["estetista", "parrucchiera", "centro benessere", "spa"]):
+            target_complement = "pantalone"
+            required_sector_tag = "estetista"
+    elif "pantalone" in title_lower:
+        if any(w in title_lower for w in ["sanitari", "medico", "infermiere", "oss"]):
+            target_complement = "casacca"
+            required_sector_tag = "sanitari"
+        elif any(w in title_lower for w in ["cuoco", "chef"]):
+            target_complement = "giacca"
+            required_sector_tag = "cuoco"
+
+    # 1. Cerca prima un complemento strettamente coerente per settore
+    if target_complement and required_sector_tag:
         for p in all_products:
             pid = p.get("id")
             ptitle = p.get("title", "").lower()
             if pid == current_product_id:
                 continue
-            if target_complement in ptitle:
-                if any(sec in title_lower and sec in ptitle for sec in ["infermiere", "bianca", "cuoco", "chef", "estetista", "sanitari"]):
-                    if pid not in related_gids:
-                        related_gids.append(pid)
-                        break
-                elif not related_gids:
-                    if pid not in related_gids:
-                        related_gids.append(pid)
+            # Verifica che il prodotto candidato contenga sia il complemento (es. pantalone) sia lo stesso settore (es. sanitari)
+            if target_complement in ptitle and required_sector_tag in ptitle:
+                if pid not in related_gids:
+                    related_gids.append(pid)
+                    if len(related_gids) >= max_items:
                         break
 
+    # 2. Se mancano elementi, cerca prodotti con parole chiave in comune ma escludendo categorie totalmente estranee (es. reception)
     keywords = [w.lower() for w in current_product_title.split() if len(w) > 3]
+    forbidden_terms = ["reception", "cravatta", "grembiule", "cErtificato"] # evita incroci errati
+
     for p in all_products:
         if len(related_gids) >= max_items:
             break
         pid = p.get("id")
-        ptitle = p.get("title", "")
+        ptitle = p.get("title", "").lower()
         if pid == current_product_id or pid in related_gids:
             continue
+        if any(ft in ptitle for ft in forbidden_terms):
+            continue
         
-        match_score = sum(1 for kw in keywords if kw in ptitle.lower())
+        match_score = sum(1 for kw in keywords if kw in ptitle)
         if match_score > 0:
             related_gids.append(pid)
                 
+    # 3. Riempimento di sicurezza finale se ancora vuoto
     if len(related_gids) < max_items:
         for p in all_products:
             if len(related_gids) >= max_items:
                 break
             pid = p.get("id")
+            ptitle = p.get("title", "").lower()
             if pid == current_product_id or pid in related_gids:
+                continue
+            if any(ft in ptitle for ft in forbidden_terms):
                 continue
             related_gids.append(pid)
                 
@@ -251,7 +266,7 @@ def bulk_add_missing_faqs_howto_and_related():
     updated_sample = []
     has_next_page = True
     end_cursor = None
-    batch_limit = 25  # Ridotto a 25 per massima sicurezza su Render
+    batch_limit = 25
 
     ref_query = """
     query {
