@@ -114,7 +114,6 @@ REGOLE CONTRO LE ALLUCINAZIONI
 - Non citare fonti esterne.
 """
 
-    # Definizione dello schema rigido per le Structured Outputs di OpenAI
     json_schema = {
         "name": "howto_guide",
         "strict": True,
@@ -142,7 +141,7 @@ REGOLE CONTRO LE ALLUCINAZIONI
                         "properties": {
                             "name": {
                                 "type": "string",
-                                "description": "Il titolo del passaggio (es. 1. Scelta della taglia)."
+                                "description": "Il titolo del passaggio."
                             },
                             "text": {
                                 "type": "string",
@@ -162,18 +161,13 @@ REGOLE CONTRO LE ALLUCINAZIONI
             response_format={"type": "json_schema", "json_schema": json_schema},
             temperature=0.2
         )
-        
         content = response.choices[0].message.content.strip()
-        
-        # Validazione difensiva aggiuntiva lato codice come suggerito
         parsed_data = json.loads(content)
         if "steps" not in parsed_data or len(parsed_data["steps"]) != 4:
             raise ValueError("Il numero di passaggi generati non è esattamente 4.")
-            
         return content
     except Exception as e:
         print(f"Errore nella generazione dello schema HowTo per '{product_title}': {e}")
-        # Fallback sicuro in caso di errore anomalo dell'API
         fallback_data = {
             "title": f"Guida pratica all'uso e alla cura di {product_title}",
             "description": "Istruzioni di base per la cura e la manutenzione del capo.",
@@ -197,16 +191,17 @@ def requests_post_safe(url, query, headers, variables=None):
         return None
 
 def bulk_add_missing_faqs_and_howto():
-    """Scansiona il catalogo Shopify e aggiunge FAQ Schema e HowTo Schema ai prodotti che ne sono sprovvisti."""
+    """Scansiona il catalogo Shopify e aggiunge FAQ Schema e HowTo Schema ai prodotti che ne sono sprovvisti (con limite batch sicuro per Render)."""
     graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
     updated_count = 0
     has_next_page = True
     end_cursor = None
+    batch_limit = 50  # Limite per evitare timeout su Render
 
-    while has_next_page:
+    while has_next_page and updated_count < batch_limit:
         query = """
         query getProducts($cursor: String) {
-          products(first: 250, after: $cursor) {
+          products(first: 50, after: $cursor) {
             pageInfo {
               hasNextPage
               endCursor
@@ -312,20 +307,18 @@ def bulk_add_missing_faqs_and_howto():
 
 @app.get("/run-bulk-faqs")
 def trigger_bulk_faqs(key: str = ""):
-    """Endpoint protetto per avviare l'aggiornamento massivo di FAQ e HowTo sui prodotti mancanti."""
     secret_key = os.getenv("BULK_SECRET_KEY", "unasegretafacile")
     if key != secret_key:
         raise HTTPException(status_code=403, detail="Non autorizzato: chiave errata o mancante.")
 
     try:
         count = bulk_add_missing_faqs_and_howto()
-        return {"status": "success", "message": f"Aggiornamento massivo completato. Metafield FAQ e HowTo aggiunti a {count} prodotti in tutto il catalogo."}
+        return {"status": "success", "message": f"Aggiornamento massivo parziale completato. Metafield FAQ e HowTo aggiunti a {count} prodotti in questo batch."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/", response_class=HTMLResponse)
 def read_root():
-    """Dashboard principale."""
     html_content = f"""
     <!DOCTYPE html>
     <html lang="it">
@@ -348,7 +341,6 @@ def read_root():
                 <h2 class="text-xl font-semibold mb-4">Pannello di Controllo</h2>
                 <p class="text-gray-600 mb-6">Scegli come procedere con l'ottimizzazione SEO dei prodotti:</p>
                 
-                <!-- SEZIONE 1: RICERCA PUNTUALE PER ID -->
                 <div class="mb-8 p-5 bg-blue-50/50 rounded-xl border border-blue-100">
                     <h3 class="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">1. Cerca e aggiorna un prodotto specifico</h3>
                     <p class="text-xs text-gray-500 mb-3">Inserisci l'ID numerico del prodotto per forzare l'ottimizzazione.</p>
@@ -361,16 +353,14 @@ def read_root():
                     </form>
                 </div>
 
-                <!-- SEZIONE 2: AGGIORNAMENTO MASSIVO FAQ & HOWTO -->
                 <div class="mb-8 p-5 bg-purple-50/50 rounded-xl border border-purple-100">
                     <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ & HowTo Schema</h3>
-                    <p class="text-xs text-gray-500 mb-3">Scansiona tutto il catalogo e aggiunge FAQ e HowTo strutturate a tutti i prodotti rimanenti.</p>
+                    <p class="text-xs text-gray-500 mb-3">Esegue l'aggiornamento sicuro in batch (fino a 50 prodotti per esecuzione) per evitare timeout.</p>
                     <a href="/run-bulk-faqs?key=unasegretafacile" target="_blank" class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition shadow">
-                        Esegui Aggiornamento Massivo Totale &rarr;
+                        Esegui Batch Aggiornamento Massivo &rarr;
                     </a>
                 </div>
 
-                <!-- SEZIONE 3: PRODOTTI IN SOSPESO -->
                 <div class="p-5 bg-gray-50 rounded-xl border border-gray-200">
                     <h3 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2">3. Prodotti in sospeso</h3>
                     <p class="text-xs text-gray-500 mb-4">Visualizza l'elenco dei prodotti che non possiedono ancora il tag "Ottimizzato IA".</p>
@@ -545,7 +535,6 @@ def apply_product_optimization(product_id: str):
         
         success = agent.update_product_seo_and_description(product_id, seo_data, tag_to_add="Ottimizzato IA")
         if success:
-            # Genera e imposta anche il metafield HowTo contestualmente all'approvazione puntuale
             howto_json = generate_howto_json(title, current_body)
             graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
             metafield_mutation = """
