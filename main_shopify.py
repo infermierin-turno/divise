@@ -187,67 +187,76 @@ def requests_post_safe(url, query, headers, variables=None):
         print(f"Errore di rete: {e}")
         return None
 
-def find_related_product_ids(current_product_title: str, all_products: list, current_product_id: str, max_items: int = 3) -> list:
-    related_gids = []
-    title_lower = current_product_title.lower()
-    
-    # 1. Riconoscimento del Macro-Settore (Recinto)
-    is_school = any(w in title_lower for w in ["grembiule", "grembiulino", "scuola", "scolastico", "asilo", "remigino"])
-    is_sanitary = any(w in title_lower for w in ["medico", "sanitari", "sanitario", "infermiere", "oss", "dottore", "dentista", "ospedale", "camice", "casacca bianca"])
-    is_horeca = any(w in title_lower for w in ["cuoco", "chef", "cameriere", "sala", "ristorazione", "cucina", "gilet", "grebiule cucina", "cravatta"])
-    is_beauty = any(w in title_lower for w in ["estetista", "parrucchiera", "centro benessere", "spa", "estetica"])
+def extract_macro_category(title: str, product_type: str = "") -> str:
+    combined = f"{product_type} {title}".lower()
+    if any(w in combined for w in ["grembiule", "grembiulino", "scuola", "scolastico", "asilo", "remigino"]):
+        return "SCUOLA"
+    if any(w in combined for w in ["medico", "sanitario", "infermiere", "oss", "dottore", "dentista", "ospedale", "camice", "casacca"]):
+        return "SANITARIO"
+    if any(w in combined for w in ["cuoco", "chef", "cameriere", "sala", "ristorazione", "cucina", "gilet", "cravatta", "grebiule cucina", "sommelier"]):
+        return "HORECA"
+    if any(w in combined for w in ["estetista", "parrucchiera", "centro benessere", "spa", "estetica", "beauty"]):
+        return "ESTETICA"
+    return "GENERICO"
 
-    # 2. Definizione delle Blacklist automatiche incrociate
+def find_related_product_ids(current_product: dict, all_products: list, max_items: int = 3) -> list:
+    related_gids = []
+    curr_title = current_product.get("title", "")
+    curr_id = current_product.get("id", "")
+    curr_type = current_product.get("productType", "")
+    
+    curr_macro = extract_macro_category(curr_title, curr_type)
+    curr_title_lower = curr_title.lower()
+    curr_is_accessory = any(w in curr_title_lower for w in ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura"])
+
+    # 1. Filtro rigoroso per Macro-Categoria e Tipologia
     for p in all_products:
         if len(related_gids) >= max_items:
             break
         pid = p.get("id")
-        ptitle = p.get("title", "").lower()
-        if pid == current_product_id or pid in related_gids:
+        ptitle = p.get("title", "")
+        ptype = p.get("productType", "")
+        
+        if pid == curr_id or pid in related_gids:
             continue
 
-        # Regola recinto SCUOLA: pesca SOLO prodotti scolastici
-        if is_school:
-            if any(w in ptitle for w in ["grembiule", "grembiulino", "scuola", "asilo", "remigino"]):
-                related_gids.append(pid)
+        p_macro = extract_macro_category(ptitle, ptype)
+        p_title_lower = ptitle.lower()
+        p_is_accessory = any(w in p_title_lower for w in ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura"])
+
+        # Blocco inter-macrocategoria: non mischiare mai settori differenti
+        if curr_macro != "GENERICO" and p_macro != "GENERICO" and curr_macro != p_macro:
             continue
 
-        # Se il prodotto corrente NON è scolastico, vieta rigorosamente che finisca un articolo scolastico tra i correlati
-        if any(w in ptitle for w in ["grembiulino", "scuola", "asilo", "remigino"]):
+        # Blocco coerenza accessori vs capi principali
+        if curr_is_accessory != p_is_accessory:
             continue
 
-        # Regola recinto SANITARIO: vieta Ho.Re.Ca. spinto (cameriere, gilet, cuoco)
-        if is_sanitary and any(term in ptitle for term in ["cameriere", "gilet", "cuoco", "chef", "cravatta"]):
-            continue
-
-        # Regola recinto HORECA: vieta camici medici o sanitari ospedalieri
-        if is_horeca and any(term in ptitle for term in ["medico", "infermiere", "ospedale", "sanitari", "oss"]):
-            continue
-
-        # Criterio di affinità per parole chiave generali se passa i filtri di recinto
-        keywords = [w.lower() for w in current_product_title.split() if len(w) > 3]
-        match_score = sum(1 for kw in keywords if kw in ptitle)
-        if match_score > 0:
+        # Criterio di affinità per parole chiave
+        keywords = [w.lower() for w in curr_title.split() if len(w) > 3]
+        match_score = sum(1 for kw in keywords if kw in p_title_lower)
+        if match_score > 0 or curr_macro == p_macro:
             related_gids.append(pid)
 
-    # 3. Riempimento di sicurezza finale (se servono elementi e non abbiamo sforato i recinti)
+    # 2. Riempimento di sicurezza controllato (stessa macro-categoria obbligatoria)
     if len(related_gids) < max_items:
         for p in all_products:
             if len(related_gids) >= max_items:
                 break
             pid = p.get("id")
-            ptitle = p.get("title", "").lower()
-            if pid == current_product_id or pid in related_gids:
-                continue
+            ptitle = p.get("title", "")
+            ptype = p.get("productType", "")
             
-            # Applicazione filtri di sicurezza anche nel fallback
-            if is_school and not any(w in ptitle for w in ["grembiule", "grembiulino", "scuola", "asilo"]):
+            if pid == curr_id or pid in related_gids:
                 continue
-            if not is_school and any(w in ptitle for w in ["grembiulino", "scuola", "asilo"]):
+
+            p_macro = extract_macro_category(ptitle, ptype)
+            p_title_lower = ptitle.lower()
+            p_is_accessory = any(w in p_title_lower for w in ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura"])
+
+            if curr_macro != "GENERICO" and p_macro != "GENERICO" and curr_macro != p_macro:
                 continue
-            if is_sanitary and any(term in ptitle for term in ["cameriere", "gilet", "cuoco", "chef"]):
-                continue
-            if is_horeca and any(term in ptitle for term in ["medico", "infermiere", "ospedale", "sanitari"]):
+            if curr_is_accessory != p_is_accessory:
                 continue
 
             related_gids.append(pid)
@@ -264,11 +273,12 @@ def bulk_add_missing_faqs_howto_and_related():
 
     ref_query = """
     query {
-      products(first: 100) {
+      products(first: 250) {
         edges {
           node {
             id
             title
+            productType
           }
         }
       }
@@ -278,7 +288,11 @@ def bulk_add_missing_faqs_howto_and_related():
     all_catalog_products = []
     if ref_resp and ref_resp.status_code == 200:
         edges_ref = ref_resp.json().get("data", {}).get("products", {}).get("edges", [])
-        all_catalog_products = [{"id": e.get("node", {}).get("id"), "title": e.get("node", {}).get("title")} for e in edges_ref]
+        all_catalog_products = [{
+            "id": e.get("node", {}).get("id"), 
+            "title": e.get("node", {}).get("title"),
+            "productType": e.get("node", {}).get("productType", "")
+        } for e in edges_ref]
 
     while has_next_page and updated_count < batch_limit:
         query = """
@@ -292,6 +306,7 @@ def bulk_add_missing_faqs_howto_and_related():
               node {
                 id
                 title
+                productType
                 descriptionHtml
                 variants(first: 20) {
                   edges {
@@ -331,6 +346,7 @@ def bulk_add_missing_faqs_howto_and_related():
             node = edge.get("node", {})
             raw_id = node.get("id", "")
             title = node.get("title", "Prodotto")
+            product_type = node.get("productType", "")
             body_html = node.get("descriptionHtml", "")
             
             has_faq = node.get("faqMetafield") is not None
@@ -363,7 +379,8 @@ def bulk_add_missing_faqs_howto_and_related():
                 })
 
             if not has_related and all_catalog_products:
-                related_ids = find_related_product_ids(title, all_catalog_products, raw_id, max_items=3)
+                current_prod_dict = {"id": raw_id, "title": title, "productType": product_type}
+                related_ids = find_related_product_ids(current_prod_dict, all_catalog_products, max_items=3)
                 if related_ids:
                     json_related_val = json.dumps(related_ids)
                     metafields_to_set.append({
