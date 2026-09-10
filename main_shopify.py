@@ -190,14 +190,23 @@ def requests_post_safe(url, query, headers, variables=None):
 
 def extract_macro_category(title: str, product_type: str = "") -> str:
     combined = f"{product_type} {title}".lower()
+    
+    # SCUOLA
     if any(w in combined for w in ["grembiule", "grembiulino", "scuola", "scolastico", "asilo", "remigino"]):
         return "SCUOLA"
-    if any(w in combined for w in ["medico", "sanitario", "infermiere", "oss", "dottore", "dentista", "ospedale", "camice medico", "pantaloni infermiere", "zoccolo", "casacca infermiere"]):
+        
+    # SANITARIO (Medici, Infermieri, OSS, Dentisti)
+    if any(w in combined for w in ["medico", "sanitario", "infermier", "oss", "dottor", "dentist", "ospedal", "camice", "casacca"]):
         return "SANITARIO"
-    if any(w in combined for w in ["cuoco", "chef", "cameriere", "sala", "ristorazione", "cucina", "gilet", "cravatta", "grebiule cucina", "grebiule barista", "scarpa cuoco", "pantaloni cameriere", "pantaloni cuoco", "pantalaccio", "camicia cameriere", "sommelier"]):
+        
+    # HORECA (Ristorazione, Cucina, Hotel, Bar)
+    if any(w in combined for w in ["cuoco", "chef", "camerier", "sala", "ristorazion", "cucina", "gilet", "cravatta", "barista", "sommelier", "pantalaccio"]):
         return "HORECA"
-    if any(w in combined for w in ["estetista", "parrucchiera", "centro benessere", "spa", "pantaloni infermiere", "zoccolo", "estetica", "beauty"]):
+        
+    # ESTETICA (Beauty, SPA, Parrucchieri, Estetiste)
+    if any(w in combined for w in ["estetist", "parrucchier", "benessere", "spa", "estetic", "beauty", "salone"]):
         return "ESTETICA"
+        
     return "GENERICO"
 
 def find_related_product_ids(current_product: dict, all_products: list, max_items: int = 3) -> list:
