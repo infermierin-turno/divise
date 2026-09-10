@@ -91,7 +91,8 @@ Crea una guida pratica, professionale e utile per:
 - scegliere correttamente la vestibilità;
 - preparare il capo all'utilizzo;
 - lavarlo e asciugarlo correttamente;
-- conservarlo e mantenerlo in buone condizioni.
+- conservarlo e mantenerlo in buone condizioni;
+- ambiti dove puo essere usato.
 
 REGOLE CONTRO LE ALLUCINAZIONI
 - Usa esclusivamente le informazioni esplicitamente presenti nei dati del prodotto.
@@ -191,11 +192,11 @@ def extract_macro_category(title: str, product_type: str = "") -> str:
     combined = f"{product_type} {title}".lower()
     if any(w in combined for w in ["grembiule", "grembiulino", "scuola", "scolastico", "asilo", "remigino"]):
         return "SCUOLA"
-    if any(w in combined for w in ["medico", "sanitario", "infermiere", "oss", "dottore", "dentista", "ospedale", "camice", "casacca"]):
+    if any(w in combined for w in ["medico", "sanitario", "infermiere", "oss", "dottore", "dentista", "ospedale", "camice", "pantaloni infermiere", "casacca"]):
         return "SANITARIO"
-    if any(w in combined for w in ["cuoco", "chef", "cameriere", "sala", "ristorazione", "cucina", "gilet", "cravatta", "grebiule cucina", "sommelier"]):
+    if any(w in combined for w in ["cuoco", "chef", "cameriere", "sala", "ristorazione", "cucina", "gilet", "cravatta", "grebiule cucina", "pantaloni cameriere", "pantaloni cuoco", "pantalaccio", "sommelier"]):
         return "HORECA"
-    if any(w in combined for w in ["estetista", "parrucchiera", "centro benessere", "spa", "estetica", "beauty"]):
+    if any(w in combined for w in ["estetista", "parrucchiera", "centro benessere", "spa", "pantaloni infermiere", "estetica", "beauty"]):
         return "ESTETICA"
     return "GENERICO"
 
