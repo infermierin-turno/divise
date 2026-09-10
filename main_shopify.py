@@ -192,11 +192,11 @@ def extract_macro_category(title: str, product_type: str = "") -> str:
     combined = f"{product_type} {title}".lower()
     if any(w in combined for w in ["grembiule", "grembiulino", "scuola", "scolastico", "asilo", "remigino"]):
         return "SCUOLA"
-    if any(w in combined for w in ["medico", "sanitario", "infermiere", "oss", "dottore", "dentista", "ospedale", "camice", "pantaloni infermiere", "casacca"]):
+    if any(w in combined for w in ["medico", "sanitario", "infermiere", "oss", "dottore", "dentista", "ospedale", "camice medico", "pantaloni infermiere", "zoccolo", "casacca infermiere"]):
         return "SANITARIO"
-    if any(w in combined for w in ["cuoco", "chef", "cameriere", "sala", "ristorazione", "cucina", "gilet", "cravatta", "grebiule cucina", "pantaloni cameriere", "pantaloni cuoco", "pantalaccio", "sommelier"]):
+    if any(w in combined for w in ["cuoco", "chef", "cameriere", "sala", "ristorazione", "cucina", "gilet", "cravatta", "grebiule cucina", "scarpa cuoco", "pantaloni cameriere", "pantaloni cuoco", "pantalaccio", "camicia cameriere", "sommelier"]):
         return "HORECA"
-    if any(w in combined for w in ["estetista", "parrucchiera", "centro benessere", "spa", "pantaloni infermiere", "estetica", "beauty"]):
+    if any(w in combined for w in ["estetista", "parrucchiera", "centro benessere", "spa", "pantaloni infermiere", "zoccolo", "estetica", "beauty"]):
         return "ESTETICA"
     return "GENERICO"
 
