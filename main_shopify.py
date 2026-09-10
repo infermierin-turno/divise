@@ -196,15 +196,17 @@ def extract_macro_category(title: str, product_type: str = "") -> str:
         return "SCUOLA"
         
     # SANITARIO (Medici, Infermieri, OSS, Dentisti)
-    if any(w in combined for w in ["medico", "sanitario", "infermier", "oss", "dottor", "dentist", "ospedal", "camice", "casacca"]):
+    # Evitiamo di catturare "camice" in modo isolato per non prendere i camici da sala/cameriere o estetica
+    sanitario_keywords = ["medico", "sanitario", "infermier", "oss", "dottor", "dentist", "ospedal", "camice medico", "camice bianco"]
+    if any(w in combined for w in sanitario_keywords) or ("camice" in combined and not any(h in combined for h in ["camerier", "cuoco", "estetist", "parrucchier", "sala", "bar"])):
         return "SANITARIO"
         
     # HORECA (Ristorazione, Cucina, Hotel, Bar)
-    if any(w in combined for w in ["cuoco", "chef", "camerier", "sala", "ristorazion", "cucina", "gilet", "cravatta", "barista", "sommelier", "pantalaccio"]):
+    if any(w in combined for w in ["cuoco", "chef", "camerier", "sala", "ristorazion", "cucina", "gilet", "cravatta", "barista", "sommelier", "pantalaccio", "camicia cameriera", "camicia cameriere"]):
         return "HORECA"
         
     # ESTETICA (Beauty, SPA, Parrucchieri, Estetiste)
-    if any(w in combined for w in ["estetist", "parrucchier", "benessere", "spa", "estetic", "beauty", "salone"]):
+    if any(w in combined for w in ["estetist", "parrucchier", "benessere", "spa", "estetic", "beauty", "salone", "casacca estetica"]):
         return "ESTETICA"
         
     return "GENERICO"
@@ -217,9 +219,12 @@ def find_related_product_ids(current_product: dict, all_products: list, max_item
     
     curr_macro = extract_macro_category(curr_title, curr_type)
     curr_title_lower = curr_title.lower()
-    curr_is_accessory = any(w in curr_title_lower for w in ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura"])
+    
+    # Definizione chiara degli accessori
+    accessory_keywords = ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura", "zoccoli"]
+    curr_is_accessory = any(w in curr_title_lower for w in accessory_keywords)
 
-    # 1. Filtro rigoroso per Macro-Categoria e Tipologia
+    # 1. Primo giro: Cerca prodotti della stessa macro-categoria con forte affinità (es. accessori per il capo principale o prodotti simili)
     for p in all_products:
         if len(related_gids) >= max_items:
             break
@@ -232,23 +237,26 @@ def find_related_product_ids(current_product: dict, all_products: list, max_item
 
         p_macro = extract_macro_category(ptitle, ptype)
         p_title_lower = ptitle.lower()
-        p_is_accessory = any(w in p_title_lower for w in ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura"])
+        p_is_accessory = any(w in p_title_lower for w in accessory_keywords)
 
-        # Blocco inter-macrocategoria: non mischiare mai settori differenti
+        # Blocco inter-macrocategoria: non mischiare mai settori differenti (es. Sanitario con Horeca)
         if curr_macro != "GENERICO" and p_macro != "GENERICO" and curr_macro != p_macro:
             continue
 
-        # Blocco coerenza accessori vs capi principali
-        if curr_is_accessory != p_is_accessory:
-            continue
-
-        # Criterio di affinità per parole chiave
-        keywords = [w.lower() for w in curr_title.split() if len(w) > 3]
+        # Logica di cross-selling intelligente:
+        # Se guardo un capo principale, diamo priorità agli accessori dello stesso settore (o viceversa).
+        # Evitiamo di bloccare totalmente se macro-categoria coincide.
+        
+        # Calcolo affinità basato su parole chiave significative (escludendo stop-words di base)
+        stop_words = {"per", "con", "donna", "uomo", "unisex", "della", "delle", "del"}
+        keywords = [w.lower() for w in curr_title.split() if len(w) > 3 and w.lower() not in stop_words]
         match_score = sum(1 for kw in keywords if kw in p_title_lower)
-        if match_score > 0 or curr_macro == p_macro:
+        
+        # Se condividono la macro categoria, li consideriamo validi (dandoci priorità se c'è match o se complementari)
+        if curr_macro == p_macro:
             related_gids.append(pid)
 
-    # 2. Riempimento di sicurezza controllato (stessa macro-categoria obbligatoria)
+    # 2. Riempimento di sicurezza controllato (pesicando sempre dalla stessa macro-categoria)
     if len(related_gids) < max_items:
         for p in all_products:
             if len(related_gids) >= max_items:
@@ -261,12 +269,7 @@ def find_related_product_ids(current_product: dict, all_products: list, max_item
                 continue
 
             p_macro = extract_macro_category(ptitle, ptype)
-            p_title_lower = ptitle.lower()
-            p_is_accessory = any(w in p_title_lower for w in ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura"])
-
             if curr_macro != "GENERICO" and p_macro != "GENERICO" and curr_macro != p_macro:
-                continue
-            if curr_is_accessory != p_is_accessory:
                 continue
 
             related_gids.append(pid)
