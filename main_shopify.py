@@ -191,19 +191,18 @@ def requests_post_safe(url, query, headers, variables=None):
 def extract_macro_category(title: str, product_type: str = "") -> str:
     combined = f"{product_type} {title}".lower()
     
-    # SCUOLA
-    if any(w in combined for w in ["grembiule", "grembiulino", "scuola", "scolastico", "asilo", "remigino"]):
+    # SCUOLA (Solo con termini scolastici espliciti, per evitare di prendere i grembiuli da lavoro)
+    if any(w in combined for w in ["grembiulino", "scuola", "scolastico", "asilo", "remigino"]) or "grembiule scuola" in combined or "grembiule asilo" in combined:
         return "SCUOLA"
         
-    # SANITARIO (Medici, Infermieri, OSS, Dentisti)
-    # Evitiamo di catturare "camice" in modo isolato per non prendere i camici da sala/cameriere o estetica
-    sanitario_keywords = ["medico", "sanitario", "infermier", "oss", "dottor", "dentist", "ospedal", "camice medico", "camice bianco"]
-    if any(w in combined for w in sanitario_keywords) or ("camice" in combined and not any(h in combined for h in ["camerier", "cuoco", "estetist", "parrucchier", "sala", "bar"])):
-        return "SANITARIO"
-        
-    # HORECA (Ristorazione, Cucina, Hotel, Bar)
-    if any(w in combined for w in ["cuoco", "chef", "camerier", "sala", "ristorazion", "cucina", "gilet", "cravatta", "barista", "sommelier", "pantalaccio", "camicia cameriera", "camicia cameriere"]):
+    # HORECA (Ristorazione, Cucina, Hotel, Bar, Sala, Grembiuli da lavoro e cameriere)
+    if any(w in combined for w in ["cuoco", "chef", "camerier", "sala", "ristorazion", "cucina", "gilet", "cravatta", "barista", "sommelier", "pantalaccio", "camicia cameriera", "camicia cameriere", "grembiule"]):
         return "HORECA"
+        
+    # SANITARIO (Medici, Infermieri, OSS, Dentisti)
+    sanitario_keywords = ["medico", "sanitario", "infermier", "oss", "dottor", "dentist", "ospedal", "camice medico", "camice bianco"]
+    if any(w in combined for w in sanitario_keywords) or ("camice" in combined and not any(h in combined for h in ["camerier", "cuoco", "estetist", "parrucchier", "sala", "bar", "domestica"])):
+        return "SANITARIO"
         
     # ESTETICA (Beauty, SPA, Parrucchieri, Estetiste)
     if any(w in combined for w in ["estetist", "parrucchier", "benessere", "spa", "estetic", "beauty", "salone", "casacca estetica"]):
