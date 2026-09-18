@@ -145,7 +145,10 @@ class ShopifyCoffeeAgent:
         body = product_data.get("body_html")
         var_list = product_data.get("variants", [])
 
-        system_prompt = """Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
+        # URL assoluto della guida alle taglie basato sul negozio corrente
+        absolute_size_guide_url = f"{self.shop_url}/pages/guida-alle-taglie"
+
+        system_prompt = f"""Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
 
 Scrivi descrizioni per un e-commerce professionale. La voce del brand è competente, concreta, affidabile e rassicurante. Il tono è professionale ma naturale, diretto e comprensibile. Usa frasi brevi, verbi attivi e informazioni utili per aiutare il cliente nella scelta.
 
@@ -174,7 +177,7 @@ La descrizione HTML deve essere ordinata e legibile e può contenere:
 - titoli <h2> descrittivi;
 - elenchi puntati con <ul> e <li>;
 - parole importanti in <strong>;
-- tag HTML <a> esclusivamente per inserire il link alla guida alle taglie ufficiale dello store (es. <a href="/pages/guida-alle-taglie">guida alle taglie</a>) laddove pertinente per aiutare il cliente nella scelta.
+- tag HTML <a> esclusivamente per inserire il link alla guida alle taglie ufficiale dello store in formato assoluto (es. <a href="{absolute_size_guide_url}" target="_blank">guida alle taglie</a>) laddove pertinente per aiutare il cliente nella scelta.
 
 Non utilizzare <h1>. Non inserire markdown, emoji, shortcode o codice JavaScript nel corpo HTML.
 
@@ -191,21 +194,21 @@ Devi restituire ESCLUSIVAMENTE un oggetto JSON valido contenente queste precise 
 4. "faq_schema" (array di oggetti JSON, obbligatorio, strutturato esattamente con `@type: "Question"`, `name` e `acceptedAnswer` con `@type: "Answer"` e `text`).
 
 Esempio di struttura richiesta:
-{
+{{
   "seo_title": "...",
   "seo_description": "...",
   "body_html": "<p>...</p>",
   "faq_schema": [
-    {
+    {{
       "@type": "Question",
       "name": "Domanda...",
-      "acceptedAnswer": {
+      "acceptedAnswer": {{
         "@type": "Answer",
         "text": "Risposta..."
-      }
-    }
+      }}
+    }}
   ]
-}"""
+}}"""
 
         user_prompt = f"""
 Analizza e riscrivi il seguente prodotto per il nostro e-commerce di abbigliamento professionale.
@@ -242,7 +245,7 @@ Varianti del prodotto:
                         "name": f"Quali varianti sono disponibili per {title}?",
                         "acceptedAnswer": {
                             "@type": "Answer",
-                            "text": f"Il prodotto {title} è disponibile nelle seguenti varianti: {variants_text}."
+                            "text": f"Il prodotto {title} è disponibile nelle seguenti varianti: {variants_text}. Per la scelta della misura corretta, puoi consultare la nostra <a href=\"{absolute_size_guide_url}\" target=\"_blank\">guida alle taglie</a>."
                         }
                     })
                 data["faq_schema"] = fallback_faqs
@@ -279,8 +282,8 @@ Varianti del prodotto:
             return True
 
         mutation_alt = """
-        mutation productUpdateMedia($media: [CreateMediaInput!]!, $productId: ID!) {
-          productUpdateMedia(media: $media, productId: $productId) {
+        mutation productUpdateMedia($media: [CreateMediaInput!]!,$productId: ID!) {
+          productUpdateMedia(media: $media, productId:$productId) {
             media {
               id
               alt
