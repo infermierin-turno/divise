@@ -7,12 +7,12 @@ class ShopifyCoffeeAgent:
     def __init__(self, shop_url, openai_api_key, client_id=None, client_secret=None, **kwargs):
         self.shop_url = shop_url.rstrip('/')
         self.ai_client = OpenAI(api_key=openai_api_key)
-
+        
         self.client_id = client_id or os.getenv("SHOPIFY_CLIENT_ID") or os.getenv("SHOPIFY_API_KEY")
         self.client_secret = client_secret or os.getenv("SHOPIFY_CLIENT_SECRET") or os.getenv("SHOPIFY_SECRET") or os.getenv("SHOPIFY_API_SECRET")
-
+        
         self.access_token = self._get_admin_access_token()
-
+        
         self.headers = {
             "Content-Type": "application/json",
             "X-Shopify-Access-Token": self.access_token if self.access_token else ""
@@ -30,7 +30,7 @@ class ShopifyCoffeeAgent:
             "client_secret": self.client_secret,
             "grant_type": "client_credentials"
         }
-
+        
         try:
             response = requests.post(auth_url, data=payload)
             if response.status_code == 200:
@@ -48,7 +48,7 @@ class ShopifyCoffeeAgent:
     def get_products(self, limit=50):
         """Recupera l'elenco dei prodotti con relative varianti tramite Shopify GraphQL Admin API."""
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
-
+        
         query = f"""
         {{
           products(first: {limit}) {{
@@ -78,9 +78,9 @@ class ShopifyCoffeeAgent:
           }}
         }}
         """
-
+        
         response = requests.post(graphql_url, json={"query": query}, headers=self.headers)
-
+        
         if response.status_code == 200:
             data = response.json()
             edges = data.get("data", {}).get("products", {}).get("edges", [])
@@ -89,7 +89,7 @@ class ShopifyCoffeeAgent:
                 node = edge.get("node", {})
                 raw_id = node.get("id", "")
                 numeric_id = raw_id.split("/")[-1] if raw_id else ""
-
+                
                 variants_list = []
                 for v_edge in node.get("variants", {}).get("edges", []):
                     v_node = v_edge.get("node", {})
@@ -123,7 +123,7 @@ class ShopifyCoffeeAgent:
                 tags_list = [t.strip() for t in tags.split(",")]
             else:
                 tags_list = tags
-
+            
             if "Ottimizzato IA" not in tags_list:
                 pending.append(p)
                 if len(pending) >= limit:
@@ -142,14 +142,9 @@ class ShopifyCoffeeAgent:
             }
 
         title = product_data.get("title")
-        body = product_data.get("body_html")
         body = product_data.get("body_html", "") or ""
         var_list = product_data.get("variants", [])
 
-        # URL assoluto della guida alle taglie basato sul negozio corrente
-        absolute_size_guide_url = f"{self.shop_url}/pages/guida-alle-taglie"
-
-        system_prompt = f"""Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
         system_prompt = """Sei un copywriter esperto di abbigliamento professionale e divise per i settori sanitario, estetico, sala, cucina, ristorazione e hospitality.
 
 Scrivi descrizioni per un e-commerce professionale. La voce del brand è competente, concreta, affidabile e rassicurante. Il tono è professionale ma naturale, diretto e comprensibile. Usa frasi brevi, verbi attivi e informazioni utili per aiutare il cliente nella scelta.
@@ -167,7 +162,6 @@ Metti in evidenza:
 - il problema o bisogno risolto dal prodotto;
 - contesti professionali adatti.
 
-REGOLA FONDAMENTALE:
 REGOLA FONDAMENTALE SUI LINK:
 Se nella descrizione attuale del prodotto è presente un link (ad esempio un URL o un file PDF della guida alle taglie), DEVI COPIARLO ESATTAMENTE così come si trova, senza modificarlo, senza inventarlo e senza sostituirlo con altri indirizzi. Se non è presente alcun link nel testo originale, non inserire alcun link.
 
@@ -183,7 +177,6 @@ La descrizione HTML deve essere ordinata e legibile e può contenere:
 - titoli <h2> descrittivi;
 - elenchi puntati con <ul> e <li>;
 - parole importanti in <strong>;
-- tag HTML <a> esclusivamente per inserire il link alla guida alle taglie ufficiale dello store in formato assoluto (es. <a href="{absolute_size_guide_url}" target="_blank">guida alle taglie</a>) laddove pertinente per aiutare il cliente nella scelta.
 - tag HTML <a> esclusivamente per riportare fedelmente eventuali link già presenti nei dati originali.
 
 Non utilizzare <h1>. Non inserire markdown, emoji, shortcode o codice JavaScript nel corpo HTML.
@@ -201,26 +194,20 @@ Devi restituire ESCLUSIVAMENTE un oggetto JSON valido contenente queste precise 
 4. "faq_schema" (array di oggetti JSON, obbligatorio, strutturato esattamente con `@type: "Question"`, `name` e `acceptedAnswer` con `@type: "Answer"` e `text`).
 
 Esempio di struttura richiesta:
-{{
 {
   "seo_title": "...",
   "seo_description": "...",
   "body_html": "<p>...</p>",
   "faq_schema": [
-    {{
     {
       "@type": "Question",
       "name": "Domanda...",
-      "acceptedAnswer": {{
       "acceptedAnswer": {
         "@type": "Answer",
         "text": "Risposta..."
-      }}
-    }}
       }
     }
   ]
-}}"""
 }"""
 
         user_prompt = f"""
@@ -229,7 +216,6 @@ Analizza e riscrivi il seguente prodotto per il nostro e-commerce di abbigliamen
 Nome prodotto:
 {title}
 
-Descrizione attuale:
 Descrizione attuale (copia eventuali link o URL presenti qui dentro senza alterarli):
 {body or "Nessuna descrizione disponibile"}
 
@@ -249,7 +235,7 @@ Varianti del prodotto:
             )
             raw_content = response.choices[0].message.content.strip()
             data = json.loads(raw_content)
-
+            
             if not data.get("faq_schema") or not isinstance(data.get("faq_schema"), list):
                 fallback_faqs = []
                 if var_list:
@@ -259,7 +245,6 @@ Varianti del prodotto:
                         "name": f"Quali varianti sono disponibili per {title}?",
                         "acceptedAnswer": {
                             "@type": "Answer",
-                            "text": f"Il prodotto {title} è disponibile nelle seguenti varianti: {variants_text}. Per la scelta della misura corretta, puoi consultare la nostra <a href=\"{absolute_size_guide_url}\" target=\"_blank\">guida alle taglie</a>."
                             "text": f"Il prodotto {title} è disponibile nelle seguenti varianti: {variants_text}."
                         }
                     })
@@ -272,7 +257,7 @@ Varianti del prodotto:
 
     def update_product_image_alt_texts(self, product_id, product_title):
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
-
+        
         query_images = f"""
         {{
           product(id: "gid://shopify/Product/{product_id}") {{
@@ -291,7 +276,7 @@ Varianti del prodotto:
         if resp.status_code != 200:
             print(f"[ERRORE] Impossibile recuperare le immagini per il prodotto {product_id}")
             return False
-
+            
         edges = resp.json().get("data", {}).get("product", {}).get("images", {}).get("edges", [])
         if not edges:
             return True
@@ -310,7 +295,7 @@ Varianti del prodotto:
           }
         }
         """
-
+        
         media_inputs = []
         for i, edge in enumerate(edges):
             img_id = edge.get("node", {}).get("id")
@@ -338,7 +323,7 @@ Varianti del prodotto:
 
     def update_product_seo_and_description(self, product_id, seo_data, tag_to_add="Ottimizzato IA"):
         graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
-
+        
         get_query = f"""
         {{
           product(id: "gid://shopify/Product/{product_id}") {{
@@ -356,7 +341,7 @@ Varianti del prodotto:
                 product_title = node.get("title", product_title)
                 if node.get("tags"):
                     tags_list = node.get("tags")
-
+        
         if tag_to_add not in tags_list:
             tags_list.append(tag_to_add)
 
@@ -380,7 +365,7 @@ Varianti del prodotto:
           }
         }
         """
-
+        
         variables = {
             "input": {
                 "id": f"gid://shopify/Product/{product_id}",
@@ -392,16 +377,16 @@ Varianti del prodotto:
                 }
             }
         }
-
+        
         response = requests.post(graphql_url, json={"query": mutation, "variables": variables}, headers=self.headers)
-
+        
         if response.status_code == 200:
             result_data = response.json()
             user_errors = result_data.get("data", {}).get("productUpdate", {}).get("userErrors", [])
             if user_errors:
                 print(f"[ERRORE GRAPHQL PRODOTTO] {user_errors}")
                 return False
-
+            
             faq_obj = seo_data.get("faq_schema")
             if faq_obj:
                 metafield_mutation = """
@@ -431,7 +416,7 @@ Varianti del prodotto:
                         }
                     ]
                 }
-
+                
                 meta_resp = requests.post(graphql_url, json={"query": metafield_mutation, "variables": metafield_variables}, headers=self.headers)
                 if meta_resp.status_code == 200:
                     meta_data = meta_resp.json()
