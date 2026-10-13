@@ -476,7 +476,7 @@ def read_root():
             <div class="bg-white rounded-xl shadow-md p-6 mb-6 space-y-6">
                 <h2 class="text-xl font-semibold mb-2">Pannello di Controllo</h2>
                 
-                <!-- Sezione Generatore Articoli Blog -->
+                <!-- Sezione Generazione Articoli Blog -->
                 <div class="p-5 bg-emerald-50/50 rounded-xl border border-emerald-100">
                     <h3 class="text-sm font-bold text-emerald-900 uppercase tracking-wide mb-2">Generatore Automatico Articoli Blog</h3>
                     <p class="text-xs text-gray-500 mb-3">Inserisci un argomento per creare un articolo autorevole e pubblicarlo direttamente sul blog di Shopify.</p>
@@ -633,4 +633,120 @@ def preview_product_optimization(product_id: str):
         
         seo_title = seo_data.get("seo_title", "")
         seo_desc = seo_data.get("seo_description", "")
-        body_html
+        body_html = seo_data.get("body_html", "")
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html lang="it">
+        <head>
+            <meta charset="UTF-8">
+            <title>Anteprima Ottimizzazione SEO</title>
+            <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+        </head>
+        <body class="bg-gray-50 text-gray-900 font-sans antialiased">
+            <div class="max-w-6xl mx-auto p-8">
+                <header class="mb-8 border-b pb-4 flex justify-between items-center">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-800">Anteprima Ottimizzazione</h1>
+                        <p class="text-sm text-gray-500">Prodotto: <strong class="text-gray-700">{title}</strong> (ID: {product_id})</p>
+                    </div>
+                    <a href="/" class="text-blue-600 hover:underline text-sm font-medium">&larr; Torna alla Home</a>
+                </header>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    <div class="bg-white border rounded-xl p-6 shadow-sm flex flex-col justify-between">
+                        <div>
+                            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 pb-2 border-b">Situazione Attuale (Originale)</h3>
+                            <div class="mb-4">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Titolo Prodotto:</span>
+                                <p class="text-gray-800 font-medium text-base">{title}</p>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Descrizione HTML Attuale:</span>
+                                <div class="text-sm text-gray-700 bg-gray-50 p-4 rounded-lg border h-96 overflow-y-auto font-mono mt-1 leading-relaxed">
+                                    {current_body if current_body else '<em>Nessuna descrizione presente</em>'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-green-300 rounded-xl p-6 shadow-md bg-green-50/20 flex flex-col justify-between">
+                        <div>
+                            <h3 class="text-xs font-bold text-green-700 uppercase tracking-wider mb-4 pb-2 border-b border-green-200">Proposta IA (Ottimizzata)</h3>
+                            <div class="mb-3">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Title:</span>
+                                <p class="text-blue-700 font-semibold text-base bg-blue-50/50 p-2 rounded border border-blue-100">{seo_title}</p>
+                            </div>
+                            <div class="mb-4">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Description:</span>
+                                <p class="text-gray-700 text-sm bg-gray-50/80 p-2.5 rounded border border-gray-200">{seo_desc}</p>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Nuovo HTML Ottimizzato:</span>
+                                <div class="text-sm text-gray-800 bg-white p-4 rounded-lg border border-green-200 h-96 overflow-y-auto font-mono mt-1 leading-relaxed">
+                                    {body_html}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-4 bg-white p-5 rounded-xl border shadow-sm items-center">
+                    <a href="/" class="px-6 py-2.5 rounded-lg border text-gray-700 hover:bg-gray-50 font-medium text-sm transition">Annulla</a>
+                    <a href="/apply/{product_id}" class="px-8 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold text-sm shadow-md transition">Approva e Scrivi su Shopify &rarr;</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/apply/{product_id}", response_class=HTMLResponse)
+def apply_product_optimization(product_id: str):
+    try:
+        url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
+        response = requests.get(url, headers=agent.headers)
+        if response.status_code != 200:
+            raise HTTPException(status_code=404, detail="Prodotto non trovato su Shopify.")
+        
+        product_data = response.json().get("product", {})
+        title = product_data.get("title", "")
+        current_body = product_data.get("body_html", "") or ""
+        variants = product_data.get("variants", [])
+        
+        seo_data = agent.optimize_divise_content({
+            "title": title,
+            "body_html": current_body,
+            "variants": variants
+        })
+        if not seo_data:
+            raise HTTPException(status_code=500, detail="Errore durante l'ottimizzazione IA del prodotto.")
+            
+        success = agent.update_product_seo_and_description(product_id, seo_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Errore durante l'aggiornamento del prodotto su Shopify.")
+            
+        return HTMLResponse(content="""
+        <!DOCTYPE html>
+        <html lang="it">
+        <head>
+            <meta charset="UTF-8">
+            <title>Aggiornamento Completato</title>
+            <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+        </head>
+        <body class="bg-gray-50 text-gray-900 font-sans antialiased flex items-center justify-center min-h-screen">
+            <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-md text-center border">
+                <h2 class="text-xl font-bold text-green-600 mb-2">Prodotto aggiornato con successo!</h2>
+                <p class="text-gray-600 text-sm mb-6">SEO, descrizione HTML, Schema FAQ e Alt Text immagini sono stati aggiornati su Shopify.</p>
+                <a href="/" class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition shadow">Torna alla Dashboard</a>
+            </div>
+        </body>
+        </html>
+        """)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    uvicorn.run("main_shopify:app", host="0.0.0.0", port=8000, reload=True)
