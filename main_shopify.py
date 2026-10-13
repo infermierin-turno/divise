@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -23,6 +24,9 @@ agent = ShopifyCoffeeAgent(
     client_id=client_id,
     client_secret=client_secret
 )
+
+# Cache in-memory per memorizzare temporaneamente gli articoli generati in attesa di approvazione
+BLOG_PREVIEW_CACHE = {}
 
 def generate_complete_faq(product_title, variants, body_html=""):
     variants_text = ", ".join([v.get("title", "") for v in variants if v.get("title")]) if variants else "Diverse opzioni disponibili"
@@ -192,16 +196,20 @@ def requests_post_safe(url, query, headers, variables=None):
 def extract_macro_category(title: str, product_type: str = "") -> str:
     combined = f"{product_type} {title}".lower()
     
+    # SCUOLA (Solo con termini scolastici espliciti)
     if any(w in combined for w in ["grembiulino", "scuola", "scolastico", "asilo", "remigino"]) or "grembiule scuola" in combined or "grembiule asilo" in combined:
         return "SCUOLA"
         
+    # HORECA (Ristorazione, Cucina, Hotel, Bar, Sala, Grembiuli da lavoro e cameriere)
     if any(w in combined for w in ["cuoco", "chef", "camerier", "sala", "ristorazion", "cucina", "gilet", "cravatta", "barista", "sommelier", "pantalaccio", "camicia cameriera", "camicia cameriere", "grembiule"]):
         return "HORECA"
         
+    # SANITARIO (Medici, Infermieri, OSS, Dentisti)
     sanitario_keywords = ["medico", "sanitario", "infermier", "oss", "dottor", "dentist", "ospedal", "camice medico", "camice bianco"]
     if any(w in combined for w in sanitario_keywords) or ("camice" in combined and not any(h in combined for h in ["camerier", "cuoco", "estetist", "parrucchier", "sala", "bar", "domestica"])):
         return "SANITARIO"
         
+    # ESTETICA (Beauty, SPA, Parrucchieri, Estetiste)
     if any(w in combined for w in ["estetist", "parrucchier", "benessere", "spa", "estetic", "beauty", "salone", "casacca estetica"]):
         return "ESTETICA"
         
@@ -219,6 +227,7 @@ def find_related_product_ids(current_product: dict, all_products: list, max_item
     accessory_keywords = ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura", "zoccoli"]
     curr_is_accessory = any(w in curr_title_lower for w in accessory_keywords)
 
+    # 1. Primo giro: Cerca prodotti della stessa macro-categoria
     for p in all_products:
         if len(related_gids) >= max_items:
             break
@@ -243,6 +252,7 @@ def find_related_product_ids(current_product: dict, all_products: list, max_item
         if curr_macro == p_macro:
             related_gids.append(pid)
 
+    # 2. Riempimento di sicurezza controllato
     if len(related_gids) < max_items:
         for p in all_products:
             if len(related_gids) >= max_items:
@@ -476,15 +486,15 @@ def read_root():
             <div class="bg-white rounded-xl shadow-md p-6 mb-6 space-y-6">
                 <h2 class="text-xl font-semibold mb-2">Pannello di Controllo</h2>
                 
-                <!-- Sezione Generazione Articoli Blog -->
+                <!-- Sezione Generazione Articoli Blog con Anteprima -->
                 <div class="p-5 bg-emerald-50/50 rounded-xl border border-emerald-100">
-                    <h3 class="text-sm font-bold text-emerald-900 uppercase tracking-wide mb-2">Generatore Automatico Articoli Blog</h3>
-                    <p class="text-xs text-gray-500 mb-3">Inserisci un argomento per creare un articolo autorevole e pubblicarlo direttamente sul blog di Shopify.</p>
-                    <form action="/generate-blog-post" method="get" class="flex gap-3">
+                    <h3 class="text-sm font-bold text-emerald-900 uppercase tracking-wide mb-2">Generatore Articoli Blog (con Anteprima)</h3>
+                    <p class="text-xs text-gray-500 mb-3">Inserisci un argomento per generare l'articolo e vederlo in anteprima prima di pubblicarlo su Shopify.</p>
+                    <form action="/preview-blog" method="get" class="flex gap-3">
                         <input type="text" name="topic" placeholder="Es. Come scegliere il camice sanitario traspirante ideale" required
                             class="flex-1 px-4 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
                         <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-5 py-2 rounded-lg text-sm transition shadow">
-                            Genera e Pubblica &rarr;
+                            Genera Anteprima Articolo &rarr;
                         </button>
                     </form>
                 </div>
@@ -528,36 +538,177 @@ def read_root():
     """
     return HTMLResponse(content=html_content)
 
-@app.get("/generate-blog-post", response_class=HTMLResponse)
-def generate_blog_post_route(topic: str):
+@app.get("/preview-blog", response_class=HTMLResponse)
+def preview_blog_post(topic: str):
     try:
-        blog_id = SHOPIFY_BLOG_ID
-        result = agent.create_blog_post(topic=topic, blog_id=blog_id)
-        if not result.get("success"):
-            raise Exception(result.get("error"))
+        prompt = f"""
+        Sei un copywriter SEO senior ed esperto di abbigliamento professionale, divise da lavoro (sanitario, HORECA, estetica, industria) e tessuti tecnici.
+        Scrivi un articolo del blog approfondito, autorevole e orientato all'e-commerce per il sito divisedivise.it.
         
-        art = result.get("article", {})
-        art_title = art.get("title", topic)
-        art_handle = art.get("handle", "")
+        Argomento dell'articolo: {topic}
         
-        return HTMLResponse(content=f"""
+        Restituisci ESCLUSIVAMENTE un oggetto JSON valido con le seguenti chiavi:
+        - "title": Titolo SEO accattivante dell'articolo
+        - "excerpt": Breve riassunto introduttivo di 2-3 righe
+        - "content": Il corpo dell'articolo completo formattato in HTML pulito con tag <h2>, <h3>, <p>, <ul> e <li>.
+        - "seo_title": Titolo ottimizzato per i motori di ricerca (max 60 caratteri)
+        - "seo_description": Meta description ottimizzata (max 155 caratteri)
+        """
+        
+        response = client_openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        article_data = json.loads(response.choices[0].message.content)
+        
+        preview_id = str(uuid.uuid4())
+        BLOG_PREVIEW_CACHE[preview_id] = article_data
+        
+        art_title = article_data.get("title", topic)
+        art_excerpt = article_data.get("excerpt", "")
+        art_content = article_data.get("content", "")
+        seo_title = article_data.get("seo_title", "")
+        seo_desc = article_data.get("seo_description", "")
+
+        html_content = f"""
         <!DOCTYPE html>
         <html lang="it">
         <head>
             <meta charset="UTF-8">
-            <title>Articolo Pubblicato</title>
+            <title>Anteprima Articolo Blog</title>
             <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
         </head>
-        <body class="bg-gray-50 text-gray-900 font-sans antialiased flex items-center justify-center min-h-screen">
-            <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-md text-center border">
-                <h2 class="text-xl font-bold text-emerald-600 mb-2">Articolo pubblicato con successo!</h2>
-                <p class="text-gray-800 font-semibold mb-1">{art_title}</p>
-                <p class="text-gray-500 text-xs mb-6">Handle: {art_handle}</p>
-                <a href="/" class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition shadow">Torna alla Dashboard</a>
+        <body class="bg-gray-50 text-gray-900 font-sans antialiased">
+            <div class="max-w-6xl mx-auto p-8">
+                <header class="mb-8 border-b pb-4 flex justify-between items-center">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-800">Anteprima Articolo Blog</h1>
+                        <p class="text-sm text-gray-500">Argomento: <strong class="text-gray-700">{topic}</strong></p>
+                    </div>
+                    <a href="/" class="text-blue-600 hover:underline text-sm font-medium">&larr; Torna alla Home</a>
+                </header>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    <div class="bg-white border rounded-xl p-6 shadow-sm flex flex-col justify-between">
+                        <div>
+                            <h3 class="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-4 pb-2 border-b">Metadati SEO Proposti</h3>
+                            <div class="mb-3">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Title (SEO Title):</span>
+                                <p class="text-blue-700 font-semibold text-base bg-blue-50/50 p-2 rounded border border-blue-100">{seo_title}</p>
+                            </div>
+                            <div class="mb-4">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Description:</span>
+                                <p class="text-gray-700 text-sm bg-gray-50/80 p-2.5 rounded border border-gray-200">{seo_desc}</p>
+                            </div>
+                            <div class="mb-4">
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Titolo Articolo:</span>
+                                <p class="text-gray-800 font-bold text-lg">{art_title}</p>
+                            </div>
+                            <div>
+                                <span class="text-xs font-bold text-gray-500 block mb-1">Estratto (Excerpt):</span>
+                                <p class="text-gray-600 text-sm bg-gray-50 p-3 rounded border italic">{art_excerpt}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-emerald-300 rounded-xl p-6 shadow-md bg-emerald-50/20 flex flex-col justify-between">
+                        <div>
+                            <h3 class="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-4 pb-2 border-b border-emerald-200">Corpo dell'Articolo (HTML Renderizzato)</h3>
+                            <div class="text-sm text-gray-800 bg-white p-4 rounded-lg border border-emerald-200 h-[420px] overflow-y-auto font-sans mt-1 leading-relaxed space-y-4">
+                                {art_content}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-4 bg-white p-5 rounded-xl border shadow-sm items-center">
+                    <a href="/" class="px-6 py-2.5 rounded-lg border text-gray-700 hover:bg-gray-50 font-medium text-sm transition">Annulla</a>
+                    <a href="/apply-blog/{preview_id}" class="px-8 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-md transition">Approva e Pubblica su Shopify &rarr;</a>
+                </div>
             </div>
         </body>
         </html>
-        """)
+        """
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/apply-blog/{preview_id}", response_class=HTMLResponse)
+def apply_blog_post(preview_id: str):
+    try:
+        article_data = BLOG_PREVIEW_CACHE.get(preview_id)
+        if not article_data:
+            raise HTTPException(status_code=404, detail="Dati dell'articolo non trovati o scaduti in cache. Genera nuovamente l'anteprima.")
+        
+        blog_id = SHOPIFY_BLOG_ID
+        graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
+        
+        mutation = """
+        mutation articleCreate($article: ArticleCreateInput!) {
+          articleCreate(article: $article) {
+            article {
+              id
+              title
+              handle
+              url
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+        """
+        
+        body_html = f"<p><em>{article_data.get('excerpt', '')}</em></p><hr>{article_data.get('content', '')}"
+        
+        variables = {
+            "article": {
+                "blogId": blog_id,
+                "title": article_data.get("title"),
+                "bodyHtml": body_html,
+                "author": "Divise & Divise",
+                "tags": ["Divise Professionali", "Guide e Consigli", "Normative"],
+                "published": True,
+                "summaryHtml": article_data.get("excerpt", "")
+            }
+        }
+        
+        resp = requests.post(graphql_url, json={"query": mutation, "variables": variables}, headers=agent.headers)
+        if resp.status_code == 200:
+            res_json = resp.json()
+            errors = res_json.get("data", {}).get("articleCreate", {}).get("userErrors", [])
+            if errors:
+                raise HTTPException(status_code=500, detail=str(errors))
+            
+            art_node = res_json.get("data", {}).get("articleCreate", {}).get("article", {})
+            art_title = art_node.get("title", "")
+            art_handle = art_node.get("handle", "")
+            
+            del BLOG_PREVIEW_CACHE[preview_id]
+            
+            return HTMLResponse(content=f"""
+            <!DOCTYPE html>
+            <html lang="it">
+            <head>
+                <meta charset="UTF-8">
+                <title>Articolo Pubblicato</title>
+                <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+            </head>
+            <body class="bg-gray-50 text-gray-900 font-sans antialiased flex items-center justify-center min-h-screen">
+                <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-md text-center border">
+                    <h2 class="text-xl font-bold text-emerald-600 mb-2">Articolo pubblicato con successo!</h2>
+                    <p class="text-gray-800 font-semibold mb-1">{art_title}</p>
+                    <p class="text-gray-500 text-xs mb-6">Handle: {art_handle}</p>
+                    <a href="/" class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition shadow">Torna alla Dashboard</a>
+                </div>
+            </body>
+            </html>
+            """)
+        else:
+            raise HTTPException(status_code=500, detail=resp.text)
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
