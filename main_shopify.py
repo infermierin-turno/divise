@@ -486,10 +486,10 @@ def read_root():
             <div class="bg-white rounded-xl shadow-md p-6 mb-6 space-y-6">
                 <h2 class="text-xl font-semibold mb-2">Pannello di Controllo</h2>
                 
-                <!-- Sezione Generazione Articoli Blog con Anteprima -->
+                <!-- Sezione Generazione Articoli Blog con Anteprima e Suggerimenti -->
                 <div class="p-5 bg-emerald-50/50 rounded-xl border border-emerald-100">
-                    <h3 class="text-sm font-bold text-emerald-900 uppercase tracking-wide mb-2">Generatore Articoli Blog (con Anteprima)</h3>
-                    <p class="text-xs text-gray-500 mb-3">Inserisci un argomento per generare l'articolo e vederlo in anteprima prima di pubblicarlo su Shopify.</p>
+                    <h3 class="text-sm font-bold text-emerald-900 uppercase tracking-wide mb-2">Generatore Articoli Blog (con Anteprima e Suggerimenti IA)</h3>
+                    <p class="text-xs text-gray-500 mb-3">Inserisci un argomento per generare l'articolo, vederlo in anteprima e ricevere idee per i prossimi post.</p>
                     <form action="/preview-blog" method="get" class="flex gap-3">
                         <input type="text" name="topic" placeholder="Es. Come scegliere il camice sanitario traspirante ideale" required
                             class="flex-1 px-4 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
@@ -553,6 +553,7 @@ def preview_blog_post(topic: str):
         - "content": Il corpo dell'articolo completo formattato in HTML pulito con tag <h2>, <h3>, <p>, <ul> e <li>.
         - "seo_title": Titolo ottimizzato per i motori di ricerca (max 60 caratteri)
         - "seo_description": Meta description ottimizzata (max 155 caratteri)
+        - "suggestions": Un array di 3 stringhe contenenti 3 argomenti correlati da consigliare per i prossimi articoli del blog.
         """
         
         response = client_openai.chat.completions.create(
@@ -570,6 +571,26 @@ def preview_blog_post(topic: str):
         art_content = article_data.get("content", "")
         seo_title = article_data.get("seo_title", "")
         seo_desc = article_data.get("seo_description", "")
+        suggestions = article_data.get("suggestions", [])
+
+        suggestions_html = ""
+        if suggestions:
+            sugg_items = ""
+            for s in suggestions:
+                sugg_items += f"""
+                <li class="flex justify-between items-center bg-white p-3 rounded-lg border hover:border-emerald-300 transition">
+                    <span class="text-sm font-medium text-gray-700">{s}</span>
+                    <a href="/preview-blog?topic={s}" class="bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white px-3 py-1 rounded text-xs font-semibold transition">
+                        Genera &rarr;
+                    </a>
+                </li>
+                """
+            suggestions_html = f"""
+            <div class="mt-8 bg-emerald-50/60 p-5 rounded-xl border border-emerald-200">
+                <h4 class="text-sm font-bold text-emerald-900 uppercase tracking-wide mb-3">💡 Suggerimenti IA per i prossimi articoli</h4>
+                <ul class="space-y-2">{sugg_items}</ul>
+            </div>
+            """
 
         html_content = f"""
         <!DOCTYPE html>
@@ -589,7 +610,7 @@ def preview_blog_post(topic: str):
                     <a href="/" class="text-blue-600 hover:underline text-sm font-medium">&larr; Torna alla Home</a>
                 </header>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-6">
                     <div class="bg-white border rounded-xl p-6 shadow-sm flex flex-col justify-between">
                         <div>
                             <h3 class="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-4 pb-2 border-b">Metadati SEO Proposti</h3>
@@ -615,17 +636,19 @@ def preview_blog_post(topic: str):
                     <div class="bg-white border border-emerald-300 rounded-xl p-6 shadow-md bg-emerald-50/20 flex flex-col justify-between">
                         <div>
                             <h3 class="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-4 pb-2 border-b border-emerald-200">Corpo dell'Articolo (HTML Renderizzato)</h3>
-                            <div class="text-sm text-gray-800 bg-white p-4 rounded-lg border border-emerald-200 h-[420px] overflow-y-auto font-sans mt-1 leading-relaxed space-y-4">
+                            <div class="text-sm text-gray-800 bg-white p-4 rounded-lg border border-emerald-200 h-[380px] overflow-y-auto font-sans mt-1 leading-relaxed space-y-4">
                                 {art_content}
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-4 bg-white p-5 rounded-xl border shadow-sm items-center">
+                <div class="flex justify-end gap-4 bg-white p-5 rounded-xl border shadow-sm items-center mb-6">
                     <a href="/" class="px-6 py-2.5 rounded-lg border text-gray-700 hover:bg-gray-50 font-medium text-sm transition">Annulla</a>
                     <a href="/apply-blog/{preview_id}" class="px-8 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-md transition">Approva e Pubblica su Shopify &rarr;</a>
                 </div>
+
+                {suggestions_html}
             </div>
         </body>
         </html>
