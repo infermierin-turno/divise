@@ -332,7 +332,7 @@ Varianti del prodotto:
             title
             tags
           }}
-        }
+        }}
         """
         resp = requests.post(graphql_url, json={"query": get_query}, headers=self.headers)
         tags_list = []
