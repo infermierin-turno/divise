@@ -59,6 +59,7 @@ class ShopifyCoffeeAgent:
                 handle
                 descriptionHtml
                 tags
+                productType
                 variants(first: 20) {{
                   edges {{
                     node {{
@@ -104,6 +105,7 @@ class ShopifyCoffeeAgent:
                 products.append({
                     "id": numeric_id,
                     "title": node.get("title"),
+                    "productType": node.get("productType", ""),
                     "body_html": node.get("descriptionHtml"),
                     "tags": node.get("tags", []),
                     "variants": variants_list
@@ -330,7 +332,7 @@ Varianti del prodotto:
             title
             tags
           }}
-        }}
+        }
         """
         resp = requests.post(graphql_url, json={"query": get_query}, headers=self.headers)
         tags_list = []
@@ -435,3 +437,78 @@ Varianti del prodotto:
         else:
             print(f"[ERRORE HTTP PRODOTTO] {response.text}")
             return False
+
+    def create_blog_post(self, topic: str, blog_id: str):
+        """Genera un articolo SEO tramite IA focalizzato su divise professionali e lo pubblica sul blog di Shopify."""
+        prompt = f"""
+        Sei un copywriter SEO senior ed esperto di abbigliamento professionale, divise da lavoro (sanitario, HORECA, estetica, industria) e tessuti tecnici.
+        Scrivi un articolo del blog approfondito, autorevole e orientato all'e-commerce per il sito divisedivise.it.
+        
+        Argomento dell'articolo: {topic}
+        
+        Restituisci ESCLUSIVAMENTE un oggetto JSON valido con le seguenti chiavi:
+        - "title": Titolo SEO accattivante dell'articolo
+        - "excerpt": Breve riassunto introduttivo di 2-3 righe
+        - "content": Il corpo dell'articolo completo formattato in HTML pulito con tag <h2>, <h3>, <p>, <ul> e <li>.
+        - "seo_title": Titolo ottimizzato per i motori di ricerca (max 60 caratteri)
+        - "seo_description": Meta description ottimizzata (max 155 caratteri)
+        """
+        
+        try:
+            response = self.ai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            article_data = json.loads(response.choices[0].message.content)
+            
+            graphql_url = f"{self.shop_url}/admin/api/2024-07/graphql.json"
+            mutation = """
+            mutation articleCreate($article: ArticleCreateInput!) {
+              articleCreate(article: $article) {
+                article {
+                  id
+                  title
+                  handle
+                  url
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+            """
+            
+            body_html = f"<p><em>{article_data.get('excerpt', '')}</em></p><hr>{article_data.get('content', '')}"
+            
+            variables = {
+                "article": {
+                    "blogId": blog_id,
+                    "title": article_data.get("title"),
+                    "bodyHtml": body_html,
+                    "author": "Divise & Divise",
+                    "tags": ["Divise Professionali", "Guide e Consigli", "Normative"],
+                    "published": True,
+                    "summaryHtml": article_data.get("excerpt", "")
+                }
+            }
+            
+            resp = requests.post(graphql_url, json={"query": mutation, "variables": variables}, headers=self.headers)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                errors = res_json.get("data", {}).get("articleCreate", {}).get("userErrors", [])
+                if errors:
+                    print(f"[ERRORE GRAPHQL BLOG] {errors}")
+                    return {"success": False, "error": errors}
+                
+                art_node = res_json.get("data", {}).get("articleCreate", {}).get("article", {})
+                print(f"[SUCCESSO] Articolo pubblicato su Shopify: {art_node.get('title')}")
+                return {"success": True, "article": art_node}
+            else:
+                print(f"[ERRORE HTTP BLOG] {resp.text}")
+                return {"success": False, "error": resp.text}
+                
+        except Exception as e:
+            print(f"Errore durante la generazione o pubblicazione del post del blog: {e}")
+            return {"success": False, "error": str(e)}
