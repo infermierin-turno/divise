@@ -13,6 +13,7 @@ shop_url = os.getenv("SHOP_URL") or "https://1a6ed6.myshopify.com"
 openai_api_key = os.getenv("OPENAI_API_KEY")
 client_id = os.getenv("SHOPIFY_CLIENT_ID")
 client_secret = os.getenv("SHOPIFY_CLIENT_SECRET")
+SHOPIFY_BLOG_ID = os.getenv("SHOPIFY_BLOG_ID") or "gid://shopify/Blog/1"
 
 client_openai = OpenAI(api_key=openai_api_key)
 
@@ -191,20 +192,16 @@ def requests_post_safe(url, query, headers, variables=None):
 def extract_macro_category(title: str, product_type: str = "") -> str:
     combined = f"{product_type} {title}".lower()
     
-    # SCUOLA (Solo con termini scolastici espliciti, per evitare di prendere i grembiuli da lavoro)
     if any(w in combined for w in ["grembiulino", "scuola", "scolastico", "asilo", "remigino"]) or "grembiule scuola" in combined or "grembiule asilo" in combined:
         return "SCUOLA"
         
-    # HORECA (Ristorazione, Cucina, Hotel, Bar, Sala, Grembiuli da lavoro e cameriere)
     if any(w in combined for w in ["cuoco", "chef", "camerier", "sala", "ristorazion", "cucina", "gilet", "cravatta", "barista", "sommelier", "pantalaccio", "camicia cameriera", "camicia cameriere", "grembiule"]):
         return "HORECA"
         
-    # SANITARIO (Medici, Infermieri, OSS, Dentisti)
     sanitario_keywords = ["medico", "sanitario", "infermier", "oss", "dottor", "dentist", "ospedal", "camice medico", "camice bianco"]
     if any(w in combined for w in sanitario_keywords) or ("camice" in combined and not any(h in combined for h in ["camerier", "cuoco", "estetist", "parrucchier", "sala", "bar", "domestica"])):
         return "SANITARIO"
         
-    # ESTETICA (Beauty, SPA, Parrucchieri, Estetiste)
     if any(w in combined for w in ["estetist", "parrucchier", "benessere", "spa", "estetic", "beauty", "salone", "casacca estetica"]):
         return "ESTETICA"
         
@@ -219,11 +216,9 @@ def find_related_product_ids(current_product: dict, all_products: list, max_item
     curr_macro = extract_macro_category(curr_title, curr_type)
     curr_title_lower = curr_title.lower()
     
-    # Definizione chiara degli accessori
     accessory_keywords = ["cappello", "cuffia", "cuffietta", "mascherina", "calzino", "scarpa", "zoccolo", "cintura", "zoccoli"]
     curr_is_accessory = any(w in curr_title_lower for w in accessory_keywords)
 
-    # 1. Primo giro: Cerca prodotti della stessa macro-categoria con forte affinità (es. accessori per il capo principale o prodotti simili)
     for p in all_products:
         if len(related_gids) >= max_items:
             break
@@ -238,24 +233,16 @@ def find_related_product_ids(current_product: dict, all_products: list, max_item
         p_title_lower = ptitle.lower()
         p_is_accessory = any(w in p_title_lower for w in accessory_keywords)
 
-        # Blocco inter-macrocategoria: non mischiare mai settori differenti (es. Sanitario con Horeca)
         if curr_macro != "GENERICO" and p_macro != "GENERICO" and curr_macro != p_macro:
             continue
 
-        # Logica di cross-selling intelligente:
-        # Se guardo un capo principale, diamo priorità agli accessori dello stesso settore (o viceversa).
-        # Evitiamo di bloccare totalmente se macro-categoria coincide.
-        
-        # Calcolo affinità basato su parole chiave significative (escludendo stop-words di base)
         stop_words = {"per", "con", "donna", "uomo", "unisex", "della", "delle", "del"}
         keywords = [w.lower() for w in curr_title.split() if len(w) > 3 and w.lower() not in stop_words]
         match_score = sum(1 for kw in keywords if kw in p_title_lower)
         
-        # Se condividono la macro categoria, li consideriamo validi (dandoci priorità se c'è match o se complementari)
         if curr_macro == p_macro:
             related_gids.append(pid)
 
-    # 2. Riempimento di sicurezza controllato (pesicando sempre dalla stessa macro-categoria)
     if len(related_gids) < max_items:
         for p in all_products:
             if len(related_gids) >= max_items:
@@ -473,7 +460,7 @@ def read_root():
     <html lang="it">
     <head>
         <meta charset="UTF-8">
-        <title>Divise & Divise - SEO Dashboard</title>
+        <title>Divise & Divise - SEO & Blog Dashboard</title>
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     </head>
     <body class="bg-gray-50 text-gray-900 font-sans antialiased">
@@ -481,16 +468,29 @@ def read_root():
             <header class="mb-8 border-b pb-4 flex justify-between items-center">
                 <div>
                     <h1 class="text-3xl font-bold text-blue-600">Divise & Divise</h1>
-                    <p class="text-sm text-gray-500">Agente SEO IA connesso a: {shop_url}</p>
+                    <p class="text-sm text-gray-500">Agente SEO & Blog IA connesso a: {shop_url}</p>
                 </div>
                 <span class="px-3 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded-full">Online</span>
             </header>
 
-            <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-                <h2 class="text-xl font-semibold mb-4">Pannello di Controllo</h2>
-                <p class="text-gray-600 mb-6">Scegli come procedere con l'ottimizzazione SEO e dei Prodotti Correlati:</p>
+            <div class="bg-white rounded-xl shadow-md p-6 mb-6 space-y-6">
+                <h2 class="text-xl font-semibold mb-2">Pannello di Controllo</h2>
                 
-                <div class="mb-8 p-5 bg-blue-50/50 rounded-xl border border-blue-100">
+                <!-- Sezione Generatore Articoli Blog -->
+                <div class="p-5 bg-emerald-50/50 rounded-xl border border-emerald-100">
+                    <h3 class="text-sm font-bold text-emerald-900 uppercase tracking-wide mb-2">Generatore Automatico Articoli Blog</h3>
+                    <p class="text-xs text-gray-500 mb-3">Inserisci un argomento per creare un articolo autorevole e pubblicarlo direttamente sul blog di Shopify.</p>
+                    <form action="/generate-blog-post" method="get" class="flex gap-3">
+                        <input type="text" name="topic" placeholder="Es. Come scegliere il camice sanitario traspirante ideale" required
+                            class="flex-1 px-4 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-5 py-2 rounded-lg text-sm transition shadow">
+                            Genera e Pubblica &rarr;
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Sezione 1: Prodotto Singolo -->
+                <div class="p-5 bg-blue-50/50 rounded-xl border border-blue-100">
                     <h3 class="text-sm font-bold text-blue-900 uppercase tracking-wide mb-2">1. Cerca e aggiorna un prodotto specifico</h3>
                     <p class="text-xs text-gray-500 mb-3">Inserisci l'ID numerico del prodotto per forzare l'ottimizzazione.</p>
                     <form action="/preview-custom" method="get" class="flex gap-3">
@@ -502,7 +502,8 @@ def read_root():
                     </form>
                 </div>
 
-                <div class="mb-8 p-5 bg-purple-50/50 rounded-xl border border-purple-100">
+                <!-- Sezione 2: Batch Massivo -->
+                <div class="p-5 bg-purple-50/50 rounded-xl border border-purple-100">
                     <h3 class="text-sm font-bold text-purple-900 uppercase tracking-wide mb-2">2. Aggiornamento Massivo FAQ, HowTo & Prodotti Correlati</h3>
                     <p class="text-xs text-gray-500 mb-3">Esegue l'aggiornamento sicuro in batch da 25 prodotti per esecuzione.</p>
                     <a href="/run-bulk-faqs?key=unasegretafacile" target="_blank" class="inline-block bg-purple-600 hover:bg-purple-700 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition shadow">
@@ -510,11 +511,14 @@ def read_root():
                     </a>
                 </div>
 
-                <div class="p-5 bg-gray-50 rounded-xl border border-gray-200">
-                    <h3 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2">3. Prodotti in sospeso</h3>
-                    <p class="text-xs text-gray-500 mb-4">Visualizza l'elenco dei prodotti che non possiedono ancora il tag "Ottimizzato IA".</p>
-                    <a href="/pending-products" class="inline-block bg-gray-800 hover:bg-gray-900 text-white font-medium px-5 py-2.5 rounded-lg shadow transition text-sm">
-                        Visualizza Prodotti in Sospeso &rarr;
+                <!-- Sezione 3: Prodotti in sospeso -->
+                <div class="p-5 bg-gray-50 rounded-xl border border-gray-200 flex justify-between items-center">
+                    <div>
+                        <h3 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-1">3. Prodotti in sospeso</h3>
+                        <p class="text-xs text-gray-500">Visualizza l'elenco dei prodotti che non possiedono ancora il tag "Ottimizzato IA".</p>
+                    </div>
+                    <a href="/pending-products" class="bg-gray-800 hover:bg-gray-900 text-white font-medium px-5 py-2.5 rounded-lg shadow transition text-sm">
+                        Visualizza &rarr;
                     </a>
                 </div>
             </div>
@@ -523,6 +527,39 @@ def read_root():
     </html>
     """
     return HTMLResponse(content=html_content)
+
+@app.get("/generate-blog-post", response_class=HTMLResponse)
+def generate_blog_post_route(topic: str):
+    try:
+        blog_id = SHOPIFY_BLOG_ID
+        result = agent.create_blog_post(topic=topic, blog_id=blog_id)
+        if not result.get("success"):
+            raise Exception(result.get("error"))
+        
+        art = result.get("article", {})
+        art_title = art.get("title", topic)
+        art_handle = art.get("handle", "")
+        
+        return HTMLResponse(content=f"""
+        <!DOCTYPE html>
+        <html lang="it">
+        <head>
+            <meta charset="UTF-8">
+            <title>Articolo Pubblicato</title>
+            <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+        </head>
+        <body class="bg-gray-50 text-gray-900 font-sans antialiased flex items-center justify-center min-h-screen">
+            <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-md text-center border">
+                <h2 class="text-xl font-bold text-emerald-600 mb-2">Articolo pubblicato con successo!</h2>
+                <p class="text-gray-800 font-semibold mb-1">{art_title}</p>
+                <p class="text-gray-500 text-xs mb-6">Handle: {art_handle}</p>
+                <a href="/" class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition shadow">Torna alla Dashboard</a>
+            </div>
+        </body>
+        </html>
+        """)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/pending-products", response_class=HTMLResponse)
 def get_pending_products():
@@ -596,143 +633,4 @@ def preview_product_optimization(product_id: str):
         
         seo_title = seo_data.get("seo_title", "")
         seo_desc = seo_data.get("seo_description", "")
-        body_html = seo_data.get("body_html", "")
-
-        html_content = f"""
-        <!DOCTYPE html>
-        <html lang="it">
-        <head>
-            <meta charset="UTF-8">
-            <title>Anteprima Ottimizzazione SEO</title>
-            <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-        </head>
-        <body class="bg-gray-50 text-gray-900 font-sans antialiased">
-            <div class="max-w-6xl mx-auto p-8">
-                <header class="mb-8 border-b pb-4 flex justify-between items-center">
-                    <div>
-                        <h1 class="text-2xl font-bold text-gray-800">Anteprima Ottimizzazione</h1>
-                        <p class="text-sm text-gray-500">Prodotto: <strong class="text-gray-700">{title}</strong> (ID: {product_id})</p>
-                    </div>
-                    <a href="/" class="text-blue-600 hover:underline text-sm font-medium">&larr; Torna alla Home</a>
-                </header>
-
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-                    <div class="bg-white border rounded-xl p-6 shadow-sm flex flex-col justify-between">
-                        <div>
-                            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 pb-2 border-b">Situazione Attuale (Originale)</h3>
-                            <div class="mb-4">
-                                <span class="text-xs font-bold text-gray-500 block mb-1">Titolo Prodotto:</span>
-                                <p class="text-gray-800 font-medium text-base">{title}</p>
-                            </div>
-                            <div>
-                                <span class="text-xs font-bold text-gray-500 block mb-1">Descrizione HTML Attuale:</span>
-                                <div class="text-sm text-gray-700 bg-gray-50 p-4 rounded-lg border h-96 overflow-y-auto font-mono mt-1 leading-relaxed">
-                                    {current_body if current_body else '<em>Nessuna descrizione presente</em>'}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-white border border-green-300 rounded-xl p-6 shadow-md bg-green-50/20 flex flex-col justify-between">
-                        <div>
-                            <h3 class="text-xs font-bold text-green-700 uppercase tracking-wider mb-4 pb-2 border-b border-green-200">Proposta IA (Ottimizzata)</h3>
-                            <div class="mb-3">
-                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Title:</span>
-                                <p class="text-blue-700 font-semibold text-base bg-blue-50/50 p-2 rounded border border-blue-100">{seo_title}</p>
-                            </div>
-                            <div class="mb-4">
-                                <span class="text-xs font-bold text-gray-500 block mb-1">Meta Description:</span>
-                                <p class="text-gray-700 text-sm bg-gray-50/80 p-2.5 rounded border border-gray-200">{seo_desc}</p>
-                            </div>
-                            <div>
-                                <span class="text-xs font-bold text-gray-500 block mb-1">Nuovo HTML Ottimizzato:</span>
-                                <div class="text-sm text-gray-800 bg-white p-4 rounded-lg border border-green-200 h-96 overflow-y-auto font-mono mt-1 leading-relaxed">
-                                    {body_html}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex justify-end gap-4 bg-white p-5 rounded-xl border shadow-sm items-center">
-                    <a href="/" class="px-6 py-2.5 rounded-lg border text-gray-700 hover:bg-gray-50 font-medium text-sm transition">Annulla</a>
-                    <a href="/apply/{product_id}" class="px-8 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold text-sm shadow-md transition">Approva e Scrivi su Shopify &rarr;</a>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=html_content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/apply/{product_id}", response_class=HTMLResponse)
-def apply_product_optimization(product_id: str):
-    try:
-        url = f"{agent.shop_url}/admin/api/2024-07/products/{product_id}.json"
-        response = requests.get(url, headers=agent.headers)
-        if response.status_code != 200:
-            raise HTTPException(status_code=404, detail="Prodotto non trovato su Shopify.")
-        
-        product_data = response.json().get("product", {})
-        title = product_data.get("title", "")
-        current_body = product_data.get("body_html", "") or ""
-        
-        seo_data = agent.optimize_divise_content(title, current_body)
-        if not seo_data:
-            raise HTTPException(status_code=500, detail="Errore durante la generazione SEO.")
-        
-        success = agent.update_product_seo_and_description(product_id, seo_data, tag_to_add="Ottimizzato IA")
-        if success:
-            howto_json = generate_howto_json(title, current_body)
-            graphql_url = f"{agent.shop_url}/admin/api/2024-07/graphql.json"
-            metafield_mutation = """
-            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-              metafieldsSet(metafields: $metafields) {
-                metafields { id }
-                userErrors { field message }
-              }
-            }
-            """
-            requests.post(
-                graphql_url,
-                json={"query": metafield_mutation, "variables": {
-                    "metafields": [{
-                        "ownerId": f"gid://shopify/Product/{product_id}",
-                        "namespace": "custom",
-                        "key": "howto_schema",
-                        "type": "json",
-                        "value": howto_json
-                    }]
-                }},
-                headers=agent.headers
-            )
-
-            html_content = f"""
-            <!DOCTYPE html>
-            <html lang="it">
-            <head>
-                <meta charset="UTF-8">
-                <title>Ottimizzazione Completata</title>
-                <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-            </head>
-            <body class="bg-gray-50 text-gray-900 font-sans antialiased">
-                <div class="max-w-xl mx-auto p-12 text-center mt-12 bg-white rounded-2xl shadow-md border">
-                    <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">&#10003;</div>
-                    <h1 class="text-2xl font-bold text-gray-800 mb-2">Aggiornato con Successo!</h1>
-                    <p class="text-gray-600 mb-6">Ottimizzazione applicata con successo al singolo prodotto.</p>
-                    <a href="/" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-lg shadow transition">
-                        Torna alla Home &rarr;
-                    </a>
-                </div>
-            </body>
-            </html>
-            """
-            return HTMLResponse(content=html_content)
-        else:
-            raise HTTPException(status_code=500, detail="Errore durante l'aggiornamento su Shopify.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=10000, reload=False)
+        body_html
